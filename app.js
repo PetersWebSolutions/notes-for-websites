@@ -1,29 +1,26 @@
 "use strict";
 
 const Tally = window.Tally;
-const STORAGE_KEY = "team-elite-ph-tshirt-orders-v1";
-const DRAFT_KEY = "team-elite-ph-tshirt-draft-v1";
+const STORAGE_KEY = "team-elite-ph-tshirt-people-v2";
+const LEGACY_KEY = "team-elite-ph-tshirt-orders-v1";
 
 const addForm = document.getElementById("add-form");
-const editForm = document.getElementById("edit-form");
-const editModal = document.getElementById("edit-modal");
-const confirmModal = document.getElementById("confirm-modal");
 const nameInput = document.getElementById("name-input");
 const searchInput = document.getElementById("search");
-const sizeFilterEl = document.getElementById("size-filter");
 const sortEl = document.getElementById("sort-orders");
 const toastEl = document.getElementById("toast");
 const liveEl = document.getElementById("live");
+const tbody = document.getElementById("order-body");
 
-let orders = [];
+let people = [];
 let filter = "all";
-let sizeFilter = "all";
 let sortMode = "entry";
 let query = "";
 let highlightId = null;
 let pendingNotice = "";
 let lastTotal = null;
 let toastTimer = 0;
+let saveTimer = 0;
 let modalReturnFocus = null;
 let confirmHandler = null;
 let extraHandler = null;
@@ -86,62 +83,86 @@ function setRadio(form, name, value) {
   });
 }
 
-function readForm(form) {
-  return {
-    name: Tally.cleanName(form.querySelector('[name="person"]').value),
-    size: getRadio(form, "size"),
-    color: getRadio(form, "color"),
-    paid: getRadio(form, "paid") === "paid"
-  };
+function findPerson(id) {
+  return people.find((person) => person.id === id) || null;
 }
 
-function loadOrders() {
+function describePerson(person) {
+  const parts = [];
+  if (Tally.hasColorOrder(person.white)) parts.push(`white ${person.white.size} ×${person.white.qty}`);
+  if (Tally.hasColorOrder(person.blue)) parts.push(`blue ${person.blue.size} ×${person.blue.qty}`);
+  if (person.xl3) parts.push(`3XL ×${person.xl3}`);
+  if (person.xl4) parts.push(`4XL ×${person.xl4}`);
+  return parts.join(" · ") || "no shirts yet";
+}
+
+/* ---------- storage ---------- */
+
+function loadPeople() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    const arr = Array.isArray(data) ? data : [];
-    const valid = arr.filter(Tally.isOrder);
-    if (valid.length !== arr.length) {
-      pendingNotice = "Some saved rows were skipped because they were incomplete.";
+    if (raw) {
+      const data = JSON.parse(raw);
+      const arr = Array.isArray(data) ? data : [];
+      const restored = [];
+      let skipped = 0;
+      arr.forEach((item) => {
+        const person = Tally.normalizePerson(item, uid);
+        if (person) restored.push(person);
+        else skipped += 1;
+      });
+      if (skipped) pendingNotice = "Some saved rows were skipped because they were incomplete.";
+      return restored.slice(0, Tally.MAX_PEOPLE);
     }
-    return valid.slice(0, Tally.MAX_PEOPLE);
+
+    const legacyRaw = localStorage.getItem(LEGACY_KEY);
+    if (legacyRaw) {
+      const data = JSON.parse(legacyRaw);
+      const arr = Array.isArray(data) ? data : [];
+      const restored = [];
+      arr.forEach((item) => {
+        const person = Tally.migrateLegacyOrder(item, uid);
+        if (person) restored.push(person);
+      });
+      if (restored.length) {
+        pendingNotice = "Your older shirt list was moved to the new one-person-per-row layout.";
+        return restored.slice(0, Tally.MAX_PEOPLE);
+      }
+    }
+    return [];
   } catch (error) {
     pendingNotice = "Could not read the saved list. Starting fresh on this device.";
     return [];
   }
 }
 
-function saveOrders() {
+function savePeople() {
   const state = document.getElementById("save-state");
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(people));
     state.classList.remove("is-error");
-    state.textContent = `Saved on this device only — not uploaded. ${stamp()}`;
+    state.textContent = `List saved on this website · ${stamp()}`;
+    return true;
   } catch (error) {
     state.classList.add("is-error");
     state.textContent = "Could not save on this device. Export a backup before you leave.";
+    return false;
   }
 }
 
-function saveDraft() {
-  try {
-    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(readForm(addForm)));
-  } catch (error) {
-    /* Draft is a convenience. The order list is what matters. */
-  }
+function scheduleSave() {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(savePeople, 400);
 }
 
-function loadDraft() {
-  try {
-    const data = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null");
-    if (!data) return;
-    if (data.name) nameInput.value = data.name;
-    if (Tally.priceFor(data.size)) setRadio(addForm, "size", data.size);
-    if (data.color === "white" || data.color === "blue") setRadio(addForm, "color", data.color);
-    setRadio(addForm, "paid", data.paid ? "paid" : "unpaid");
-  } catch (error) {
-    sessionStorage.removeItem(DRAFT_KEY);
+function saveNow() {
+  window.clearTimeout(saveTimer);
+  const ok = savePeople();
+  if (ok) {
+    showToast("List saved on this website.");
+    announce(`List saved. ${Tally.peopleLabel(people.length)} on the list.`);
+  } else {
+    showToast("Could not save on this device. Export a backup before you leave.");
   }
 }
 
@@ -172,98 +193,165 @@ function hideToast() {
   toastEl.replaceChildren();
 }
 
+/* ---------- list ---------- */
+
 function isFiltered() {
-  return query.trim() !== "" || filter !== "all" || sizeFilter !== "all";
+  return query.trim() !== "" || filter !== "all";
 }
 
-function visibleOrders() {
-  let list = orders.slice();
+function visiblePeople() {
+  let list = people.slice();
   const q = query.trim().toLowerCase();
-  if (q) list = list.filter((order) => order.name.toLowerCase().includes(q));
-  if (filter === "paid") list = list.filter((order) => order.paid);
-  if (filter === "unpaid") list = list.filter((order) => !order.paid);
-  if (filter === "white") list = list.filter((order) => order.color === "white");
-  if (filter === "blue") list = list.filter((order) => order.color === "blue");
-  if (sizeFilter !== "all") list = list.filter((order) => order.size === sizeFilter);
+  if (q) list = list.filter((person) => person.name.toLowerCase().includes(q));
+  if (filter === "paid") list = list.filter((person) => person.paid);
+  if (filter === "unpaid") list = list.filter((person) => !person.paid);
+  if (filter === "white") list = list.filter((person) => Tally.hasColorOrder(person.white));
+  if (filter === "blue") list = list.filter((person) => Tally.hasColorOrder(person.blue));
 
   const byTime = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
   if (sortMode === "name") {
     list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || byTime(a, b));
   } else if (sortMode === "unpaid") {
     list.sort((a, b) => Number(a.paid) - Number(b.paid) || byTime(a, b));
-  } else if (sortMode === "size") {
-    list.sort((a, b) => Tally.SIZES.indexOf(a.size) - Tally.SIZES.indexOf(b.size) || byTime(a, b));
-  } else if (sortMode === "color") {
-    list.sort((a, b) => a.color.localeCompare(b.color) || byTime(a, b));
   }
   return list;
 }
 
-function entryNumber(order) {
-  return orders.findIndex((item) => item.id === order.id) + 1;
+function entryNumber(person) {
+  return people.findIndex((item) => item.id === person.id) + 1;
 }
 
-function colorCell(color, label, order) {
-  const cell = h("td", { class: `col-${color}`, "data-label": label });
-  if (order.color === color) {
-    cell.append(h("span", {
-      class: `size-pill ${color}`,
-      text: order.size,
-      title: `${colorLabel(color)} ${order.size}`
-    }));
-  } else {
-    cell.append(
-      h("span", { class: "dash", "aria-hidden": "true", text: "—" }),
-      h("span", { class: "sr-only", text: "None" })
-    );
-  }
+function buildSizeSelect(person, color) {
+  const select = h("select", {
+    class: "size-select",
+    "data-field": `${color}-size`,
+    "aria-label": `${colorLabel(color)} size`
+  });
+  select.append(h("option", { value: "", text: "—" }));
+  Tally.SIZES.forEach((size) => select.append(h("option", { value: size, text: size })));
+  select.value = person[color].size;
+  return select;
+}
+
+function splitColorField(person, field) {
+  const color = field.startsWith("white") ? "white" : "blue";
+  return person[color].qty;
+}
+
+function colorCell(person, color) {
+  const cell = h("td", { class: `col-${color}`, "data-label": colorLabel(color, true) });
+  const wrap = h("div", { class: "cell-order" });
+  const select = buildSizeSelect(person, color);
+  const qty = h("input", {
+    class: "qty-input",
+    type: "number",
+    min: "0",
+    max: String(Tally.MAX_QTY),
+    inputmode: "numeric",
+    "data-field": `${color}-qty`,
+    "aria-label": `${colorLabel(color)} quantity`
+  });
+  qty.value = String(person[color].qty);
+  qty.disabled = !person[color].size;
+  wrap.append(select, qty);
+  cell.append(wrap);
   return cell;
 }
 
-function renderRow(order) {
-  const price = Tally.PRICES[order.size];
-  const row = h("tr", {
-    "data-id": order.id,
-    class: `${order.paid ? "is-paid" : "is-unpaid"}${order.id === highlightId ? " is-new" : ""}`
+function extraCell(person, field, label) {
+  const cell = h("td", { class: `col-${field}`, "data-label": label });
+  const qty = h("input", {
+    class: "qty-input",
+    type: "number",
+    min: "0",
+    max: String(Tally.MAX_QTY),
+    inputmode: "numeric",
+    "data-field": field,
+    "aria-label": `Extra ${label} quantity`
   });
+  qty.value = String(person[field]);
+  cell.append(qty);
+  return cell;
+}
+
+function renderRow(person) {
+  const row = h("tr", {
+    "data-id": person.id,
+    class: `${person.paid ? "is-paid" : "is-unpaid"}${person.id === highlightId ? " is-new" : ""}`
+  });
+
   const nameCell = h("th", { scope: "row", class: "col-name", "data-label": "NAME" });
   nameCell.append(h("div", { class: "name-wrap" },
-    h("span", { class: "num", text: String(entryNumber(order)).padStart(3, "0") }),
-    h("span", { class: "who" },
-      h("span", { class: "who-name", text: order.name }),
-      h("span", { class: "who-meta", text: `${order.size} · ${colorLabel(order.color)}` })
-    )
+    h("span", { class: "num", text: String(entryNumber(person)).padStart(3, "0") }),
+    h("input", {
+      class: "name-input",
+      type: "text",
+      maxlength: "80",
+      value: person.name,
+      "data-field": "name",
+      "aria-label": "Name",
+      autocapitalize: "words",
+      autocomplete: "off",
+      spellcheck: "false"
+    })
   ));
 
   const status = h("td", { class: "col-status", "data-label": "PAID/UNPAID" });
   status.append(h("button", {
     type: "button",
-    class: `pay-pill ${order.paid ? "is-paid" : "is-unpaid"}`,
+    class: `pay-pill ${person.paid ? "is-paid" : "is-unpaid"}`,
     "data-action": "toggle",
-    "aria-pressed": order.paid ? "true" : "false",
-    "aria-label": `${order.paid ? "Mark unpaid" : "Mark paid"}: ${order.name}`,
-    text: order.paid ? "PAID" : "UNPAID"
+    "aria-pressed": person.paid ? "true" : "false",
+    "aria-label": `${person.paid ? "Mark unpaid" : "Mark paid"}: ${person.name}`,
+    text: person.paid ? "PAID" : "UNPAID"
   }));
 
   const actions = h("td", { class: "col-actions no-print", "data-label": "Actions" });
-  actions.append(
-    h("button", { type: "button", class: "text-btn", "data-action": "edit", text: "Edit", "aria-label": `Edit ${order.name}` }),
-    h("button", { type: "button", class: "text-btn danger", "data-action": "remove", text: "Remove", "aria-label": `Remove ${order.name}` })
-  );
+  actions.append(h("button", {
+    type: "button",
+    class: "remove-btn",
+    "data-action": "remove",
+    "aria-label": `Remove ${person.name}`,
+    title: "Remove",
+    text: "×"
+  }));
 
   row.append(
     nameCell,
-    colorCell("white", "WHITE", order),
-    colorCell("blue", "BLUE", order),
-    h("td", {
-      class: `col-price${order.size === "2XL" ? " is-premium" : ""}`,
-      "data-label": "PRICE",
-      text: Tally.formatPesos(price)
-    }),
+    colorCell(person, "white"),
+    colorCell(person, "blue"),
+    extraCell(person, "xl3", "3XL"),
+    extraCell(person, "xl4", "4XL"),
+    h("td", { class: "col-price", "data-label": "PRICE" },
+      h("span", { class: "price-figure", text: Tally.formatPesos(Tally.personPrice(person)) })),
     status,
     actions
   );
   return row;
+}
+
+function updatePriceCell(row, person) {
+  const figure = row.querySelector(".price-figure");
+  if (figure) figure.textContent = Tally.formatPesos(Tally.personPrice(person));
+}
+
+function syncColorInputs(row, person, color) {
+  const select = row.querySelector(`[data-field="${color}-size"]`);
+  const qty = row.querySelector(`[data-field="${color}-qty"]`);
+  if (select) select.value = person[color].size;
+  if (qty) {
+    qty.value = String(person[color].qty);
+    qty.disabled = !person[color].size;
+  }
+}
+
+function renderTable() {
+  const shown = visiblePeople();
+  document.getElementById("empty-state").hidden = people.length !== 0;
+  document.getElementById("no-match").hidden = people.length === 0 || shown.length !== 0;
+  document.getElementById("sheet").hidden = shown.length === 0;
+  tbody.replaceChildren(...shown.map(renderRow));
+  highlightId = null;
 }
 
 function renderFoot(shown, full) {
@@ -273,7 +361,7 @@ function renderFoot(shown, full) {
   const name = h("th", { scope: "row", class: "col-name", "data-label": "NAME" });
   name.append(
     h("span", { class: "foot-label", text: filtered ? "SHOWN" : "TOTAL" }),
-    h("span", { class: "foot-count", text: Tally.peopleLabel(summary.count) })
+    h("span", { class: "foot-count", text: `${Tally.peopleLabel(summary.count)} · ${Tally.shirtsLabel(summary.shirts)}` })
   );
   if (filtered) {
     name.append(h("span", { class: "foot-note", text: `Full list total ${Tally.formatPesos(full.total)} is below` }));
@@ -289,6 +377,8 @@ function renderFoot(shown, full) {
     name,
     h("td", { class: "col-white", "data-label": "WHITE", text: String(summary.colorCount.white) }),
     h("td", { class: "col-blue", "data-label": "BLUE", text: String(summary.colorCount.blue) }),
+    h("td", { class: "col-xl3", "data-label": "3XL", text: String(summary.extras["3XL"]) }),
+    h("td", { class: "col-xl4", "data-label": "4XL", text: String(summary.extras["4XL"]) }),
     h("td", { class: "col-price", "data-label": "PRICE" }, h("span", { class: "total-figure", text: Tally.formatPesos(summary.total) })),
     status,
     h("td", { class: "col-actions no-print", "data-label": "" })
@@ -312,11 +402,18 @@ function renderMatrix(summary) {
   ));
 
   function row(label, color) {
-    const count = color ? summary.colorCount[color] : summary.count;
-    const amount = color ? summary.colorAmount[color] : summary.total;
+    const count = color === "extra"
+      ? summary.colorCount.extra
+      : color ? summary.colorCount[color] : summary.shirts;
+    const amount = color === "extra"
+      ? summary.colorAmount.extra
+      : color ? summary.colorAmount[color] : summary.total;
+    const cells = Tally.SIZES.map((size) => color === "extra"
+      ? countCell(summary.extras[size])
+      : color ? countCell(summary.grid[color][size]) : countCell(summary.sizeCount[size]));
     return h("tr", { class: color ? `${color}-row` : "total-row" },
       h("td", { class: "row-label", text: label }),
-      ...Tally.SIZES.map((size) => countCell(color ? summary.grid[color][size] : summary.sizeCount[size])),
+      ...cells,
       h("td", { class: "shirts", text: String(count) }),
       h("td", { class: "amount", text: Tally.formatPesos(amount) })
     );
@@ -325,6 +422,7 @@ function renderMatrix(summary) {
   table.replaceChildren(head, h("tbody", {},
     row("WHITE", "white"),
     row("BLUE", "blue"),
+    row("3XL/4XL EXTRA", "extra"),
     row("TOTAL", null)
   ));
 }
@@ -333,18 +431,19 @@ function renderSummary(summary) {
   document.getElementById("sum-total").textContent = Tally.formatPesos(summary.total);
   document.getElementById("sum-paid").textContent = Tally.formatPesos(summary.paid);
   document.getElementById("sum-unpaid").textContent = Tally.formatPesos(summary.unpaid);
-  document.getElementById("sum-people").textContent = `${Tally.peopleLabel(summary.count)} · ${summary.colorCount.white} white · ${summary.colorCount.blue} blue`;
+  document.getElementById("sum-people").textContent = `${Tally.peopleLabel(summary.count)} · ${Tally.shirtsLabel(summary.shirts)}`;
   document.getElementById("sum-paid-count").textContent = `${summary.paidCount} paid`;
   document.getElementById("sum-unpaid-count").textContent = `${summary.unpaidCount} unpaid`;
   document.getElementById("updated-at").textContent = isFiltered()
     ? "This total is the full list, not just the rows shown above."
-    : orders.length
+    : people.length
       ? `Full list · updated ${stamp()}`
       : "Full list · no one added yet";
-  document.getElementById("price-note").textContent = `S, M, L, and XL are ${Tally.formatPesos(Tally.PRICES.S)}. 2XL is ${Tally.formatPesos(Tally.PRICES["2XL"])}.`;
+  document.getElementById("price-note").textContent =
+    `S, M, L, and XL are ${Tally.formatPesos(Tally.PRICES.S)}. 2XL, 3XL, and 4XL are ${Tally.formatPesos(Tally.PRICES["2XL"])}. The 3XL and 4XL columns are extra shirts at ${Tally.formatPesos(Tally.PRICES["3XL"])} each.`;
   renderMatrix(summary);
 
-  const empty = orders.length === 0;
+  const empty = people.length === 0;
   document.getElementById("copy-summary").disabled = empty;
   document.getElementById("copy-unpaid").disabled = empty;
   document.getElementById("export-csv").disabled = empty;
@@ -364,8 +463,7 @@ function renderTotalBar(summary) {
   bar.replaceChildren(
     h("div", { class: "bar-counts" },
       barStat("PEOPLE", String(summary.count)),
-      barStat("WHITE", String(summary.colorCount.white)),
-      barStat("BLUE", String(summary.colorCount.blue))
+      barStat("SHIRTS", String(summary.shirts))
     ),
     h("div", { class: "bar-money" },
       barStat("PAID", Tally.formatPesos(summary.paid), "paid"),
@@ -382,48 +480,45 @@ function renderTotalBar(summary) {
 }
 
 function renderMeta(summary) {
-  const left = Tally.MAX_PEOPLE - orders.length;
-  document.getElementById("header-count").textContent = `${orders.length} / ${Tally.MAX_PEOPLE}`;
-  const meter = document.getElementById("meter");
-  meter.setAttribute("aria-valuenow", String(orders.length));
-  meter.classList.toggle("is-warn", left > 0 && left <= 30);
-  meter.classList.toggle("is-full", left === 0);
-  document.getElementById("meter-fill").style.width = `${(orders.length / Tally.MAX_PEOPLE) * 100}%`;
+  document.getElementById("head-people").textContent = String(summary.count);
+  document.getElementById("head-shirts").textContent = String(summary.shirts);
+
+  const left = Tally.MAX_PEOPLE - people.length;
   document.getElementById("spots-left").textContent = left === 0
-    ? "List is full"
-    : `${left} ${left === 1 ? "spot" : "spots"} left`;
+    ? "Up to 300 people — list is full"
+    : `Up to 300 people · ${left} ${left === 1 ? "spot" : "spots"} left`;
   document.getElementById("full-banner").hidden = left !== 0;
   document.getElementById("add-btn").disabled = left === 0;
+  document.getElementById("add-btn").textContent = left === 0 ? "List is full" : "Add person";
 
-  const shown = visibleOrders();
+  const shown = visiblePeople();
   document.getElementById("result-count").textContent = isFiltered()
-    ? `Showing ${Tally.peopleLabel(shown.length)} of ${orders.length}`
-    : (orders.length ? Tally.peopleLabel(orders.length) : "No one yet");
+    ? `Showing ${Tally.peopleLabel(shown.length)} of ${people.length}`
+    : (people.length ? Tally.peopleLabel(people.length) : "No one yet");
 
   document.querySelectorAll("[data-filter]").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.filter === filter ? "true" : "false");
   });
 
-  document.title = orders.length
+  document.title = people.length
     ? `(${Tally.formatPesos(summary.total)}) TEAM ELITE PH TSHIRT`
     : "TEAM ELITE PH TSHIRT";
+}
+
+function renderTotals() {
+  const summary = Tally.summarize(people);
+  const shown = visiblePeople();
+  renderMeta(summary);
+  renderFoot(shown, summary);
+  renderSummary(summary);
+  renderTotalBar(summary);
 }
 
 function render(options = {}) {
   const keepScroll = options.keepScroll !== false;
   const scrollY = window.scrollY;
-  const summary = Tally.summarize(orders);
-  const shown = visibleOrders();
-  document.getElementById("empty-state").hidden = orders.length !== 0;
-  document.getElementById("no-match").hidden = orders.length === 0 || shown.length !== 0;
-  document.getElementById("sheet").hidden = shown.length === 0;
-  document.getElementById("order-body").replaceChildren(...shown.map(renderRow));
-  highlightId = null;
-  if (shown.length) renderFoot(shown, summary);
-  renderMeta(summary);
-  renderSummary(summary);
-  renderTotalBar(summary);
-  refreshAddForm();
+  renderTable();
+  renderTotals();
   if (keepScroll && typeof window.scrollTo === "function") {
     window.scrollTo(0, scrollY);
     if (window.requestAnimationFrame) {
@@ -446,142 +541,169 @@ function setFormError(id, message) {
   }
 }
 
-function refreshAddForm() {
-  const draft = readForm(addForm);
-  const price = Tally.priceFor(draft.size);
-  const summary = Tally.summarize(orders);
-  const priceText = price == null ? "—" : Tally.formatPesos(price);
-  setText("shirt-price", priceText);
-  setText("shirt-detail", describeSelection(draft.size, draft.color));
-  setText("inline-price", price == null ? "Price: —" : `Price: ${priceText}`);
-  setText("running-total", Tally.formatPesos(summary.total));
-  const after = document.getElementById("after-add");
-  const ready = price != null && draft.color && draft.name && orders.length < Tally.MAX_PEOPLE;
-  after.hidden = !ready;
-  if (ready) after.textContent = `After adding: ${Tally.formatPesos(summary.total + price)}`;
-
-  const button = document.getElementById("add-btn");
-  if (orders.length >= Tally.MAX_PEOPLE) button.textContent = "List is full";
-  else if (addForm.dataset.confirmDup === "1") button.textContent = "Add anyway";
-  else if (ready) button.textContent = `Add to list · ${Tally.formatPesos(price)}`;
-  else button.textContent = "Add to list";
-
-  updateDupHint(draft.name);
-}
-
-function describeSelection(size, color) {
-  if (!size && !color) return "Choose a size and a color";
-  if (size && !color) return `${size} · choose white or blue`;
-  if (!size && color) return `${colorLabel(color)} · choose a size`;
-  return `${size} · ${colorLabel(color, true)}`;
-}
-
 function updateDupHint(name) {
   const hint = document.getElementById("dup-hint");
   const matches = name
-    ? orders.filter((order) => order.name.toLowerCase() === name.toLowerCase())
+    ? people.filter((person) => person.name.toLowerCase() === name.toLowerCase())
     : [];
   if (!matches.length) {
     hint.hidden = true;
     hint.textContent = "";
     return;
   }
-  const detail = matches.map((order) => `${order.size} ${colorLabel(order.color)} · ${order.paid ? "Paid" : "Unpaid"}`).join("; ");
+  const detail = matches.map((person) => describePerson(person)).join("; ");
   hint.hidden = false;
   hint.textContent = matches.length === 1
-    ? `Already on the list: ${detail}. You can still add another shirt.`
-    : `Already on the list ${matches.length} times: ${detail}. You can still add another shirt.`;
+    ? `Already on the list: ${detail}.`
+    : `Already on the list ${matches.length} times: ${detail}.`;
 }
 
-function validateDraft(draft, errorId, form) {
-  if (!draft.name || !Tally.isValidName(draft.name)) {
-    setFormError(errorId, "Enter the person's name.");
-    form.querySelector('[name="person"]').focus();
-    return false;
-  }
-  if (!Tally.priceFor(draft.size)) {
-    setFormError(errorId, "Choose a size: S, M, L, XL, or 2XL.");
-    form.querySelector('input[name="size"]')?.focus();
-    return false;
-  }
-  if (draft.color !== "white" && draft.color !== "blue") {
-    setFormError(errorId, "Choose a color: white or blue.");
-    form.querySelector('input[name="color"]')?.focus();
-    return false;
-  }
-  setFormError(errorId, "");
-  return true;
-}
+/* ---------- actions ---------- */
 
-function addOrder(event) {
+function addPerson(event) {
   event.preventDefault();
-  if (orders.length >= Tally.MAX_PEOPLE) {
+  if (people.length >= Tally.MAX_PEOPLE) {
     setFormError("form-error", "The list is full at 300 people. Remove someone to add another.");
     return;
   }
-  const draft = readForm(addForm);
-  if (!validateDraft(draft, "form-error", addForm)) return;
-
-  const exact = orders.find((order) =>
-    order.name.toLowerCase() === draft.name.toLowerCase()
-    && order.size === draft.size
-    && order.color === draft.color
-  );
-  if (exact && addForm.dataset.confirmDup !== "1") {
-    addForm.dataset.confirmDup = "1";
-    setFormError("form-error", `${draft.name} already has ${draft.size} ${colorLabel(draft.color)}. Press Add anyway to add another shirt.`);
-    refreshAddForm();
+  const name = Tally.cleanName(nameInput.value);
+  if (!Tally.isValidName(name)) {
+    setFormError("form-error", "Enter the person's name.");
+    nameInput.focus();
     return;
   }
 
-  const order = {
+  const dup = people.some((person) => person.name.toLowerCase() === name.toLowerCase());
+  if (dup && addForm.dataset.confirmDup !== "1") {
+    addForm.dataset.confirmDup = "1";
+    setFormError("form-error", `${name} is already on the list. Press Add anyway to add another person.`);
+    return;
+  }
+
+  const person = {
     id: uid(),
-    name: draft.name,
-    size: draft.size,
-    color: draft.color,
-    paid: draft.paid,
+    name,
+    white: Tally.emptyColor(),
+    blue: Tally.emptyColor(),
+    xl3: 0,
+    xl4: 0,
+    paid: getRadio(addForm, "paid") === "paid",
     createdAt: Date.now()
   };
-  orders.push(order);
-  saveOrders();
+  people.push(person);
+  savePeople();
   delete addForm.dataset.confirmDup;
   nameInput.value = "";
   setRadio(addForm, "paid", "unpaid");
-  saveDraft();
-  highlightId = order.id;
-  const hiddenByFilter = isFiltered() && !visibleOrders().some((item) => item.id === order.id);
+  highlightId = person.id;
   render({ keepScroll: false });
   setFormError("form-error", "");
-  const summary = Tally.summarize(orders);
-  announce(`Added ${order.name}, ${order.size} ${colorLabel(order.color)}, ${Tally.formatPesos(Tally.PRICES[order.size])}. Total ${Tally.formatPesos(summary.total)}.`);
-  if (hiddenByFilter) showToast(`Added ${order.name}. Clear the filter to see them in the list.`);
+  updateDupHint("");
+  const summary = Tally.summarize(people);
+  announce(`Added ${person.name}. ${Tally.peopleLabel(summary.count)} on the list, ${Tally.shirtsLabel(summary.shirts)}.`);
+  const hiddenByFilter = isFiltered() && !visiblePeople().some((item) => item.id === person.id);
+  if (hiddenByFilter) showToast(`Added ${person.name}. Clear the filter to see them in the list.`);
   nameInput.focus();
 }
 
 function togglePaid(id) {
-  const order = orders.find((item) => item.id === id);
-  if (!order) return;
-  order.paid = !order.paid;
-  saveOrders();
+  const person = findPerson(id);
+  if (!person) return;
+  person.paid = !person.paid;
+  savePeople();
   render();
-  const summary = Tally.summarize(orders);
-  announce(`${order.name} marked ${order.paid ? "paid" : "unpaid"}. Unpaid ${Tally.formatPesos(summary.unpaid)}. Total ${Tally.formatPesos(summary.total)}.`);
+  const summary = Tally.summarize(people);
+  announce(`${person.name} marked ${person.paid ? "paid" : "unpaid"}. Unpaid ${Tally.formatPesos(summary.unpaid)}. Total ${Tally.formatPesos(summary.total)}.`);
 }
 
-function removeOrder(id) {
-  const index = orders.findIndex((item) => item.id === id);
+function removePerson(id) {
+  const index = people.findIndex((item) => item.id === id);
   if (index < 0) return;
-  const [removed] = orders.splice(index, 1);
-  saveOrders();
+  const [removed] = people.splice(index, 1);
+  savePeople();
   render();
   announce(`Removed ${removed.name}.`);
   showToast(`Removed ${removed.name}.`, "Undo", () => {
-    orders.splice(Math.min(index, orders.length), 0, removed);
-    saveOrders();
+    people.splice(Math.min(index, people.length), 0, removed);
+    savePeople();
     render();
     announce(`${removed.name} is back on the list.`);
   });
 }
+
+function setQtyField(person, field, rawValue) {
+  if (field === "white-qty" || field === "blue-qty") {
+    const color = field.startsWith("white") ? "white" : "blue";
+    person[color].qty = person[color].size ? Tally.clampQty(rawValue) : 0;
+  } else if (field === "xl3" || field === "xl4") {
+    person[field] = Tally.clampQty(rawValue);
+  }
+}
+
+function onRowInput(event) {
+  const field = event.target.dataset && event.target.dataset.field;
+  if (!field) return;
+  const row = event.target.closest("tr");
+  const person = row && findPerson(row.dataset.id);
+  if (!person) return;
+
+  if (field === "name") {
+    person.name = String(event.target.value || "").slice(0, 80);
+    scheduleSave();
+    return;
+  }
+  if (field === "white-qty" || field === "blue-qty" || field === "xl3" || field === "xl4") {
+    setQtyField(person, field, event.target.value);
+    updatePriceCell(row, person);
+    renderTotals();
+    scheduleSave();
+  }
+}
+
+function onRowChange(event) {
+  const field = event.target.dataset && event.target.dataset.field;
+  if (!field) return;
+  const row = event.target.closest("tr");
+  const person = row && findPerson(row.dataset.id);
+  if (!person) return;
+
+  if (field === "name") {
+    const cleaned = Tally.cleanName(event.target.value);
+    if (Tally.isValidName(cleaned)) {
+      person.name = cleaned;
+      event.target.value = cleaned;
+    } else {
+      event.target.value = person.name;
+      showToast("A name is needed for every row.");
+    }
+    savePeople();
+    renderTotals();
+    return;
+  }
+
+  if (field === "white-size" || field === "blue-size") {
+    const color = field.startsWith("white") ? "white" : "blue";
+    const order = person[color];
+    order.size = Tally.priceFor(event.target.value) != null ? event.target.value : "";
+    if (!order.size) order.qty = 0;
+    else if (!order.qty) order.qty = 1;
+    syncColorInputs(row, person, color);
+    updatePriceCell(row, person);
+    renderTotals();
+    savePeople();
+    return;
+  }
+
+  if (field === "white-qty" || field === "blue-qty" || field === "xl3" || field === "xl4") {
+    setQtyField(person, field, event.target.value);
+    event.target.value = String(field.endsWith("-qty") ? splitColorField(person, field) : person[field]);
+    updatePriceCell(row, person);
+    renderTotals();
+    savePeople();
+  }
+}
+
+/* ---------- modals ---------- */
 
 function focusable(modal) {
   return [...modal.querySelectorAll("button, input, select, textarea")].filter((el) => {
@@ -616,53 +738,8 @@ function trapTab(event, modal) {
   }
 }
 
-function openEdit(id) {
-  const order = orders.find((item) => item.id === id);
-  if (!order) return;
-  editForm.querySelector('[name="id"]').value = order.id;
-  editForm.querySelector('[name="person"]').value = order.name;
-  setRadio(editForm, "size", order.size);
-  setRadio(editForm, "color", order.color);
-  setRadio(editForm, "paid", order.paid ? "paid" : "unpaid");
-  setFormError("edit-error", "");
-  refreshEditPrice();
-  openModal(editModal);
-  editForm.querySelector('[name="person"]').focus();
-}
-
-function closeEdit() {
-  closeModal(editModal);
-}
-
-function refreshEditPrice() {
-  const draft = readForm(editForm);
-  const price = Tally.priceFor(draft.size);
-  document.getElementById("edit-price").textContent = price == null
-    ? "Price: —"
-    : `Price: ${Tally.formatPesos(price)}${draft.color ? ` · ${draft.size} ${colorLabel(draft.color, true)}` : ""}`;
-}
-
-function saveEdit(event) {
-  event.preventDefault();
-  const id = editForm.querySelector('[name="id"]').value;
-  const order = orders.find((item) => item.id === id);
-  if (!order) {
-    closeEdit();
-    return;
-  }
-  const draft = readForm(editForm);
-  if (!validateDraft(draft, "edit-error", editForm)) return;
-  order.name = draft.name;
-  order.size = draft.size;
-  order.color = draft.color;
-  order.paid = draft.paid;
-  saveOrders();
-  closeEdit();
-  render();
-  announce(`Updated ${order.name}. Total ${Tally.formatPesos(Tally.summarize(orders).total)}.`);
-}
-
 function openConfirm(options) {
+  const modal = document.getElementById("confirm-modal");
   document.getElementById("confirm-title").textContent = options.title;
   document.getElementById("confirm-body").textContent = options.body;
   const ok = document.getElementById("confirm-ok");
@@ -673,15 +750,17 @@ function openConfirm(options) {
   extra.textContent = options.extraLabel || "";
   confirmHandler = options.onConfirm || null;
   extraHandler = options.onExtra || null;
-  openModal(confirmModal);
+  openModal(modal);
   document.getElementById("confirm-cancel").focus();
 }
 
 function closeConfirm() {
   confirmHandler = null;
   extraHandler = null;
-  closeModal(confirmModal);
+  closeModal(document.getElementById("confirm-modal"));
 }
+
+/* ---------- export / backup ---------- */
 
 function download(filename, text, type) {
   const blob = new Blob([text], { type });
@@ -699,30 +778,51 @@ function csvEscape(value) {
 }
 
 function buildCsv() {
-  const summary = Tally.summarize(orders);
+  const summary = Tally.summarize(people);
   const rows = [
-    ["Name", "Size", "Color", "Price", "Status"],
-    ...orders.map((order) => [
-      order.name,
-      order.size,
-      colorLabel(order.color),
-      Tally.PRICES[order.size],
-      order.paid ? "Paid" : "Unpaid"
+    ["Name", "White size", "White qty", "Blue size", "Blue qty", "3XL", "4XL", "Price", "Status"],
+    ...people.map((person) => [
+      person.name,
+      person.white.size,
+      person.white.qty,
+      person.blue.size,
+      person.blue.qty,
+      person.xl3,
+      person.xl4,
+      Tally.personPrice(person),
+      person.paid ? "Paid" : "Unpaid"
     ])
   ];
   rows.push([]);
   rows.push(["SUMMARY"]);
   rows.push(["Color", ...Tally.SIZES, "Shirts", "Amount"]);
-  ["white", "blue"].forEach((color) => {
-    rows.push([
-      colorLabel(color),
-      ...Tally.SIZES.map((size) => summary.grid[color][size]),
-      summary.colorCount[color],
-      summary.colorAmount[color]
-    ]);
-  });
-  rows.push(["Total", ...Tally.SIZES.map((size) => summary.sizeCount[size]), summary.count, summary.total]);
+  rows.push([
+    "White",
+    ...Tally.SIZES.map((size) => summary.grid.white[size]),
+    summary.colorCount.white,
+    summary.colorAmount.white
+  ]);
+  rows.push([
+    "Blue",
+    ...Tally.SIZES.map((size) => summary.grid.blue[size]),
+    summary.colorCount.blue,
+    summary.colorAmount.blue
+  ]);
+  rows.push([
+    "3XL/4XL extra",
+    ...Tally.SIZES.map((size) => summary.extras[size]),
+    summary.colorCount.extra,
+    summary.colorAmount.extra
+  ]);
+  rows.push([
+    "Total",
+    ...Tally.SIZES.map((size) => summary.sizeCount[size]),
+    summary.shirts,
+    summary.total
+  ]);
   rows.push([]);
+  rows.push(["People", summary.count]);
+  rows.push(["Shirts", summary.shirts]);
   rows.push(["Paid", summary.paid]);
   rows.push(["Unpaid", summary.unpaid]);
   rows.push(["Total", summary.total]);
@@ -732,9 +832,9 @@ function buildCsv() {
 function downloadBackup() {
   const payload = {
     app: "TEAM ELITE PH TSHIRT",
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
-    orders
+    people
   };
   download(
     `team-elite-ph-tshirt-backup-${fileDate()}.json`,
@@ -744,7 +844,7 @@ function downloadBackup() {
 }
 
 function exportCsv() {
-  if (!orders.length) return;
+  if (!people.length) return;
   download(`team-elite-ph-tshirt-${fileDate()}.csv`, buildCsv(), "text/csv;charset=utf-8");
 }
 
@@ -767,26 +867,27 @@ async function copyText(text) {
 }
 
 function summaryText() {
-  const summary = Tally.summarize(orders);
+  const summary = Tally.summarize(people);
   const line = (color) => Tally.SIZES.map((size) => `${size} ${summary.grid[color][size]}`).join("  ");
   return [
     "TEAM ELITE PH TSHIRT",
-    Tally.peopleLabel(summary.count),
+    `${Tally.peopleLabel(summary.count)} · ${Tally.shirtsLabel(summary.shirts)}`,
     `White — ${line("white")}`,
     `Blue — ${line("blue")}`,
+    `3XL extra ${summary.extras["3XL"]} · 4XL extra ${summary.extras["4XL"]}`,
     `Total: ${Tally.formatPesos(summary.total)}`,
-    `Paid: ${Tally.formatPesos(summary.paid)} (${summary.paidCount})`,
-    `Unpaid: ${Tally.formatPesos(summary.unpaid)} (${summary.unpaidCount})`
+    `Paid: ${Tally.formatPesos(summary.paid)} (${summary.paidCount} people)`,
+    `Unpaid: ${Tally.formatPesos(summary.unpaid)} (${summary.unpaidCount} people)`
   ].join("\n");
 }
 
 function unpaidText() {
-  const unpaid = orders.filter((order) => !order.paid);
-  const summary = Tally.summarize(orders);
+  const unpaid = people.filter((person) => !person.paid);
+  const summary = Tally.summarize(people);
   if (!unpaid.length) return "TEAM ELITE PH TSHIRT\nEveryone is paid.";
   return [
     "UNPAID — TEAM ELITE PH TSHIRT",
-    ...unpaid.map((order, index) => `${index + 1}. ${order.name} — ${order.size} ${colorLabel(order.color)} — ${Tally.formatPesos(Tally.PRICES[order.size])}`),
+    ...unpaid.map((person, index) => `${index + 1}. ${person.name} — ${describePerson(person)} — ${Tally.formatPesos(Tally.personPrice(person))}`),
     `Unpaid total: ${Tally.formatPesos(summary.unpaid)}`
   ].join("\n");
 }
@@ -798,32 +899,46 @@ function parseBackup(text) {
   } catch (error) {
     throw new Error("That file is not a readable backup.");
   }
-  const arr = Array.isArray(data) ? data : data && Array.isArray(data.orders) ? data.orders : null;
+  const arr = Array.isArray(data)
+    ? data
+    : data && Array.isArray(data.people)
+      ? data.people
+      : data && Array.isArray(data.orders)
+        ? data.orders
+        : null;
   if (!arr) throw new Error("This file is not a Team Elite shirt backup.");
-  const valid = arr.filter(Tally.isOrder);
-  if (valid.length > Tally.MAX_PEOPLE) {
-    throw new Error(`That backup has ${valid.length} people. This list holds 300.`);
+
+  const restored = [];
+  let skipped = 0;
+  arr.forEach((item) => {
+    const legacy = item && item.size != null && item.color != null && !item.white && !item.blue;
+    const person = legacy ? Tally.migrateLegacyOrder(item, uid) : Tally.normalizePerson(item, uid);
+    if (person) restored.push(person);
+    else skipped += 1;
+  });
+  if (restored.length > Tally.MAX_PEOPLE) {
+    throw new Error(`That backup has ${restored.length} people. This list holds 300.`);
   }
-  if (!valid.length) throw new Error("No usable people were found in that backup.");
-  return { valid, skipped: arr.length - valid.length };
+  if (!restored.length) throw new Error("No usable people were found in that backup.");
+  return { people: restored, skipped };
 }
 
-function applyRestore(valid, skipped) {
+function applyRestore(restored, skipped) {
   const go = () => {
-    orders = valid;
-    saveOrders();
+    people = restored;
+    savePeople();
     render();
     showToast(skipped
-      ? `Restored ${Tally.peopleLabel(valid.length)}. ${skipped} ${skipped === 1 ? "row was" : "rows were"} skipped.`
-      : `Restored ${Tally.peopleLabel(valid.length)}.`);
+      ? `Restored ${Tally.peopleLabel(people.length)}. ${skipped} ${skipped === 1 ? "row was" : "rows were"} skipped.`
+      : `Restored ${Tally.peopleLabel(people.length)}.`);
   };
-  if (!orders.length) {
+  if (!people.length) {
     go();
     return;
   }
   openConfirm({
     title: "Replace the current list?",
-    body: `This device already has ${Tally.peopleLabel(orders.length)}. Replacing it cannot be undone unless you downloaded a backup.`,
+    body: `This device already has ${Tally.peopleLabel(people.length)}. Replacing it cannot be undone unless you downloaded a backup.`,
     confirmLabel: "Replace list",
     danger: true,
     extraLabel: "Download backup first",
@@ -834,21 +949,17 @@ function applyRestore(valid, skipped) {
 
 function clearFilters() {
   filter = "all";
-  sizeFilter = "all";
   query = "";
   searchInput.value = "";
-  sizeFilterEl.value = "all";
   render();
 }
 
 function beforePrint() {
-  printSnapshot = { filter, sizeFilter, sortMode, query, search: searchInput.value };
+  printSnapshot = { filter, sortMode, query, search: searchInput.value };
   filter = "all";
-  sizeFilter = "all";
   sortMode = "entry";
   query = "";
   searchInput.value = "";
-  sizeFilterEl.value = "all";
   sortEl.value = "entry";
   document.getElementById("print-stamp").textContent = `Full list · printed ${stamp()}`;
   render();
@@ -856,9 +967,8 @@ function beforePrint() {
 
 function afterPrint() {
   if (!printSnapshot) return;
-  ({ filter, sizeFilter, sortMode, query } = printSnapshot);
+  ({ filter, sortMode, query } = printSnapshot);
   searchInput.value = printSnapshot.search;
-  sizeFilterEl.value = sizeFilter;
   sortEl.value = sortMode;
   printSnapshot = null;
   render();
@@ -866,46 +976,27 @@ function afterPrint() {
 
 function fillPrices() {
   document.getElementById("price-legend").textContent = Tally.priceLegend();
-  document.querySelectorAll("[data-price-for]").forEach((el) => {
-    const price = Tally.priceFor(el.dataset.priceFor);
-    if (price != null) el.textContent = Tally.formatPesos(price);
-  });
-  Tally.SIZES.forEach((size) => {
-    sizeFilterEl.append(h("option", { value: size, text: size }));
-  });
 }
 
+/* ---------- wiring ---------- */
+
 function bind() {
-  addForm.addEventListener("submit", addOrder);
+  addForm.addEventListener("submit", addPerson);
   addForm.addEventListener("input", () => {
     delete addForm.dataset.confirmDup;
     setFormError("form-error", "");
-    saveDraft();
-    refreshAddForm();
-  });
-  addForm.addEventListener("change", () => {
-    saveDraft();
-    refreshAddForm();
+    updateDupHint(Tally.cleanName(nameInput.value));
   });
 
-  editForm.addEventListener("submit", saveEdit);
-  editForm.addEventListener("input", refreshEditPrice);
-  editForm.addEventListener("change", refreshEditPrice);
-  document.getElementById("edit-cancel").addEventListener("click", closeEdit);
-  document.getElementById("edit-remove").addEventListener("click", () => {
-    const id = editForm.querySelector('[name="id"]').value;
-    closeEdit();
-    removeOrder(id);
-  });
-
-  document.getElementById("order-body").addEventListener("click", (event) => {
+  tbody.addEventListener("input", onRowInput);
+  tbody.addEventListener("change", onRowChange);
+  tbody.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const id = button.closest("tr")?.dataset.id;
     if (!id) return;
     if (button.dataset.action === "toggle") togglePaid(id);
-    if (button.dataset.action === "edit") openEdit(id);
-    if (button.dataset.action === "remove") removeOrder(id);
+    if (button.dataset.action === "remove") removePerson(id);
   });
 
   searchInput.addEventListener("input", () => {
@@ -920,16 +1011,13 @@ function bind() {
     render();
   });
 
-  sizeFilterEl.addEventListener("change", () => {
-    sizeFilter = sizeFilterEl.value;
-    render();
-  });
   sortEl.addEventListener("change", () => {
     sortMode = sortEl.value;
     render();
   });
   document.getElementById("clear-filters").addEventListener("click", clearFilters);
 
+  document.getElementById("save-btn").addEventListener("click", saveNow);
   document.getElementById("export-csv").addEventListener("click", exportCsv);
   document.getElementById("print-btn").addEventListener("click", () => window.print());
   document.getElementById("backup-btn").addEventListener("click", downloadBackup);
@@ -940,29 +1028,29 @@ function bind() {
     if (!file) return;
     try {
       const parsed = parseBackup(await file.text());
-      applyRestore(parsed.valid, parsed.skipped);
+      applyRestore(parsed.people, parsed.skipped);
     } catch (error) {
       showToast(error.message || "Could not restore that file.");
     }
   });
 
   document.getElementById("clear-btn").addEventListener("click", () => {
-    if (!orders.length) return;
+    if (!people.length) return;
     openConfirm({
       title: "Erase the whole list?",
-      body: `This removes ${Tally.peopleLabel(orders.length)} from this device. Download a backup first if you still need the names.`,
+      body: `This removes ${Tally.peopleLabel(people.length)} from this website. Download a backup first if you still need the names.`,
       confirmLabel: "Erase list",
       danger: true,
       extraLabel: "Download backup",
       onExtra: downloadBackup,
       onConfirm: () => {
-        const snapshot = orders.slice();
-        orders = [];
-        saveOrders();
+        const snapshot = people.slice();
+        people = [];
+        savePeople();
         render();
         showToast("List cleared.", "Undo", () => {
-          orders = snapshot;
-          saveOrders();
+          people = snapshot;
+          savePeople();
           render();
         });
       }
@@ -990,19 +1078,17 @@ function bind() {
 
   document.querySelectorAll("[data-close]").forEach((el) => {
     el.addEventListener("click", () => {
-      if (el.dataset.close === "edit") closeEdit();
       if (el.dataset.close === "confirm") closeConfirm();
     });
   });
 
   document.addEventListener("keydown", (event) => {
+    const modal = document.getElementById("confirm-modal");
     if (event.key === "Escape") {
-      if (!confirmModal.hidden) closeConfirm();
-      else if (!editModal.hidden) closeEdit();
+      if (!modal.hidden) closeConfirm();
       return;
     }
-    if (!confirmModal.hidden) trapTab(event, confirmModal);
-    else if (!editModal.hidden) trapTab(event, editModal);
+    if (!modal.hidden) trapTab(event, modal);
   });
 
   window.addEventListener("beforeprint", beforePrint);
@@ -1025,8 +1111,7 @@ function init() {
     return;
   }
   fillPrices();
-  orders = loadOrders();
-  loadDraft();
+  people = loadPeople();
   bind();
   render();
   if (pendingNotice) showToast(pendingNotice);
