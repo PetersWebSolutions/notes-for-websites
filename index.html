@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#0b1f3a">
-  <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. Enter a name, size, and white or blue. Prices and the total stay on the sheet.">
+  <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. List each person, pick white and blue sizes and quantities, and the price and totals update on the sheet.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Elite PH Shirts">
@@ -28,14 +28,17 @@
         <div class="brand-copy">
           <p class="eyebrow">Sales tally</p>
           <h1>TEAM ELITE PH <span>TSHIRT</span></h1>
-          <p class="price-legend" id="price-legend">Prices in pesos: S, M, L, XL — ₱399 · 2XL — ₱449</p>
+          <p class="price-legend" id="price-legend">Prices in pesos: S, M, L, XL — ₱399 · 2XL, 3XL, 4XL — ₱449</p>
         </div>
       </div>
-      <div class="capacity-block">
-        <p class="capacity-count" id="header-count">0 / 300</p>
-        <p class="capacity-label">people</p>
-        <div class="meter" id="meter" role="meter" aria-valuemin="0" aria-valuemax="300" aria-valuenow="0" aria-label="People on the list">
-          <span id="meter-fill"></span>
+      <div class="header-totals" aria-label="List totals">
+        <div class="head-stat">
+          <strong id="head-people">0</strong>
+          <span>people</span>
+        </div>
+        <div class="head-stat">
+          <strong id="head-shirts">0</strong>
+          <span>shirts</span>
         </div>
       </div>
     </div>
@@ -49,100 +52,34 @@
       <p class="form-error">This tally needs JavaScript turned on so it can add up the prices.</p>
     </noscript>
 
-    <form id="add-form" class="composer" autocomplete="off" novalidate>
-      <div class="composer-main">
-        <div class="composer-head">
-          <h2>Add a person</h2>
-          <p class="helper" id="spots-left">Up to 300 people</p>
+    <form id="add-form" class="add-bar" autocomplete="off" novalidate>
+      <label class="field" for="name-input">NAME</label>
+      <input id="name-input" name="person" type="text" maxlength="80" placeholder="Full name" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done" aria-required="true" aria-describedby="name-help">
+      <p class="helper" id="name-help">Add the person, then set their white and blue sizes on the row. <span id="spots-left">Up to 300 people</span></p>
+      <p class="hint" id="dup-hint" hidden></p>
+
+      <fieldset class="pay-fieldset">
+        <legend class="sr-only">PAID/UNPAID</legend>
+        <div class="pay-toggle">
+          <label class="pay-option">
+            <input type="radio" name="paid" value="unpaid" checked>
+            <span>UNPAID</span>
+          </label>
+          <label class="pay-option">
+            <input type="radio" name="paid" value="paid">
+            <span>PAID</span>
+          </label>
         </div>
+      </fieldset>
 
-        <label class="field" for="name-input">NAME</label>
-        <input id="name-input" name="person" type="text" maxlength="80" placeholder="Full name" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done" aria-required="true" aria-describedby="name-help">
-        <p class="helper" id="name-help">One shirt per row. Add the same name again for another shirt.</p>
-        <p class="hint" id="dup-hint" hidden></p>
-
-        <fieldset class="size-picker">
-          <legend>SIZE</legend>
-          <div class="choice-row">
-            <label class="size-btn">
-              <input type="radio" name="size" value="S">
-              <span class="size-name">S</span>
-              <span class="size-price" data-price-for="S">₱399</span>
-            </label>
-            <label class="size-btn">
-              <input type="radio" name="size" value="M">
-              <span class="size-name">M</span>
-              <span class="size-price" data-price-for="M">₱399</span>
-            </label>
-            <label class="size-btn">
-              <input type="radio" name="size" value="L">
-              <span class="size-name">L</span>
-              <span class="size-price" data-price-for="L">₱399</span>
-            </label>
-            <label class="size-btn">
-              <input type="radio" name="size" value="XL">
-              <span class="size-name">XL</span>
-              <span class="size-price" data-price-for="XL">₱399</span>
-            </label>
-            <label class="size-btn is-2xl">
-              <input type="radio" name="size" value="2XL">
-              <span class="size-name">2XL</span>
-              <span class="size-price" data-price-for="2XL">₱449</span>
-            </label>
-          </div>
-        </fieldset>
-
-        <fieldset class="color-picker">
-          <legend>T-SHIRT COLOR</legend>
-          <div class="choice-row colors">
-            <label class="color-btn white">
-              <input type="radio" name="color" value="white">
-              <span class="dot" aria-hidden="true"></span>
-              <span>WHITE</span>
-            </label>
-            <label class="color-btn blue">
-              <input type="radio" name="color" value="blue">
-              <span class="dot" aria-hidden="true"></span>
-              <span>BLUE</span>
-            </label>
-          </div>
-        </fieldset>
-
-        <p class="inline-price" id="inline-price">Price: —</p>
-        <p class="form-error" id="full-banner" hidden>The list is full at 300 people. Remove someone to add another.</p>
-        <p class="form-error" id="form-error" role="alert" hidden></p>
-      </div>
-
-      <aside class="price-card">
-        <p class="price-kicker">Price in pesos</p>
-        <p class="shirt-price" id="shirt-price">—</p>
-        <p class="shirt-detail" id="shirt-detail">Choose a size</p>
-
-        <div class="card-total">
-          <p class="price-kicker">List total</p>
-          <p class="running-total" id="running-total">₱0</p>
-          <p class="after-add" id="after-add" hidden></p>
-        </div>
-
-        <fieldset class="pay-fieldset">
-          <legend>PAID/UNPAID</legend>
-          <div class="pay-toggle on-dark">
-            <label class="pay-option">
-              <input type="radio" name="paid" value="unpaid" checked>
-              <span>UNPAID</span>
-            </label>
-            <label class="pay-option">
-              <input type="radio" name="paid" value="paid">
-              <span>PAID</span>
-            </label>
-          </div>
-        </fieldset>
-
-        <button type="submit" class="add-btn" id="add-btn">Add to list</button>
-      </aside>
+      <button type="submit" class="add-btn" id="add-btn">Add person</button>
+      <p class="form-error" id="full-banner" hidden>The list is full at 300 people. Remove someone to add another.</p>
+      <p class="form-error" id="form-error" role="alert" hidden></p>
     </form>
 
     <div class="toolbar no-print">
+      <button type="button" class="tool-btn primary" id="save-btn">Save list</button>
+
       <label class="search-label" for="search">Search</label>
       <input id="search" class="search" type="search" placeholder="Search name" autocomplete="off" enterkeyhint="search">
 
@@ -154,18 +91,11 @@
         <button type="button" class="chip" data-filter="blue" aria-pressed="false">Blue</button>
       </div>
 
-      <label class="select-label">Size
-        <select id="size-filter" aria-label="Filter by size">
-          <option value="all">All sizes</option>
-        </select>
-      </label>
       <label class="select-label">Sort
         <select id="sort-orders" aria-label="Sort the list">
           <option value="entry">List order</option>
           <option value="name">Name</option>
           <option value="unpaid">Unpaid first</option>
-          <option value="size">Size</option>
-          <option value="color">Color</option>
         </select>
       </label>
 
@@ -185,9 +115,9 @@
           <h2 id="list-title">People</h2>
           <p id="result-count" class="helper">No one yet</p>
         </div>
-        <p id="save-state" class="save-state">Saved on this device only — not uploaded.</p>
+        <p id="save-state" class="save-state">Tap Save list to store the list on this website.</p>
       </div>
-      <p class="tap-hint no-print">The size goes under WHITE or BLUE. Click PAID or UNPAID to update payment.</p>
+      <p class="tap-hint no-print">Each row is one person. Set a size and quantity under WHITE or BLUE, add extra 3XL / 4XL shirts, and click PAID or UNPAID to update payment.</p>
 
       <div id="empty-state" class="empty">
         <div class="empty-shirt" aria-hidden="true">
@@ -198,16 +128,16 @@
           </svg>
         </div>
         <h3>No shirts listed yet</h3>
-        <p>Enter a name, size, and color. The price appears before you add them, and the total stays at the bottom.</p>
+        <p>Enter a name above to add a person. Their row has a size menu for white and for blue, each with its own quantity.</p>
         <ul class="price-pills">
           <li>S · M · L · XL <strong>₱399</strong></li>
-          <li>2XL <strong>₱449</strong></li>
+          <li>2XL · 3XL · 4XL <strong>₱449</strong></li>
         </ul>
       </div>
 
       <div id="no-match" class="empty" hidden>
         <h3>No one matches</h3>
-        <p>Try another name, or clear the filters. The total below still includes everyone.</p>
+        <p>Try another name, or clear the filters. The totals still include everyone.</p>
         <button type="button" class="ghost-btn" id="clear-filters">Clear filters</button>
       </div>
 
@@ -219,6 +149,8 @@
               <tr>
                 <th rowspan="2" scope="col" class="col-name">NAME</th>
                 <th colspan="2" scope="colgroup" class="color-group">T-SHIRT COLOR</th>
+                <th rowspan="2" scope="col" class="col-xl3">3XL</th>
+                <th rowspan="2" scope="col" class="col-xl4">4XL</th>
                 <th rowspan="2" scope="col" class="col-price">PRICE</th>
                 <th rowspan="2" scope="col" class="col-status">PAID/UNPAID</th>
                 <th rowspan="2" scope="col" class="col-actions"><span class="sr-only">Actions</span></th>
@@ -251,7 +183,7 @@
         <article class="money-card total">
           <p>TOTAL</p>
           <strong id="sum-total">₱0</strong>
-          <span id="sum-people">0 people</span>
+          <span id="sum-people">0 people · 0 shirts</span>
         </article>
         <article class="money-card paid">
           <p>PAID</p>
@@ -267,7 +199,7 @@
 
       <div class="matrix-block">
         <h3>Count by color and size</h3>
-        <p class="helper" id="price-note">S, M, L, and XL are ₱399. 2XL is ₱449.</p>
+        <p class="helper" id="price-note">S, M, L, and XL are ₱399. 2XL, 3XL, and 4XL are ₱449.</p>
         <div class="matrix-scroll">
           <table class="matrix" id="matrix"></table>
         </div>
@@ -276,58 +208,6 @@
   </main>
 
   <footer class="total-bar" id="total-bar" aria-label="Totals"></footer>
-
-  <div id="edit-modal" class="modal" hidden>
-    <div class="modal-backdrop" data-close="edit"></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="edit-title">
-      <div class="modal-head">
-        <h2 id="edit-title">Edit order</h2>
-        <button type="button" class="icon-x" data-close="edit" aria-label="Close">×</button>
-      </div>
-      <form id="edit-form" autocomplete="off" novalidate>
-        <input type="hidden" name="id" id="edit-id">
-        <label class="field" for="edit-name">NAME</label>
-        <input id="edit-name" name="person" type="text" maxlength="80" autocapitalize="words" autocomplete="off" required aria-required="true">
-
-        <fieldset class="size-picker">
-          <legend>SIZE</legend>
-          <div class="choice-row">
-            <label class="size-btn"><input type="radio" name="size" value="S"><span class="size-name">S</span><span class="size-price" data-price-for="S">₱399</span></label>
-            <label class="size-btn"><input type="radio" name="size" value="M"><span class="size-name">M</span><span class="size-price" data-price-for="M">₱399</span></label>
-            <label class="size-btn"><input type="radio" name="size" value="L"><span class="size-name">L</span><span class="size-price" data-price-for="L">₱399</span></label>
-            <label class="size-btn"><input type="radio" name="size" value="XL"><span class="size-name">XL</span><span class="size-price" data-price-for="XL">₱399</span></label>
-            <label class="size-btn is-2xl"><input type="radio" name="size" value="2XL"><span class="size-name">2XL</span><span class="size-price" data-price-for="2XL">₱449</span></label>
-          </div>
-        </fieldset>
-
-        <fieldset class="color-picker">
-          <legend>T-SHIRT COLOR</legend>
-          <div class="choice-row colors">
-            <label class="color-btn white"><input type="radio" name="color" value="white"><span class="dot" aria-hidden="true"></span><span>WHITE</span></label>
-            <label class="color-btn blue"><input type="radio" name="color" value="blue"><span class="dot" aria-hidden="true"></span><span>BLUE</span></label>
-          </div>
-        </fieldset>
-
-        <fieldset class="pay-fieldset on-light">
-          <legend>PAID/UNPAID</legend>
-          <div class="pay-toggle on-light">
-            <label class="pay-option"><input type="radio" name="paid" value="unpaid"><span>UNPAID</span></label>
-            <label class="pay-option"><input type="radio" name="paid" value="paid"><span>PAID</span></label>
-          </div>
-        </fieldset>
-
-        <p class="edit-price" id="edit-price">Price: —</p>
-        <p class="form-error" id="edit-error" role="alert" hidden></p>
-
-        <div class="modal-actions">
-          <button type="button" class="text-btn danger" id="edit-remove">Remove</button>
-          <span class="spacer"></span>
-          <button type="button" class="ghost-btn" id="edit-cancel">Cancel</button>
-          <button type="submit" class="primary-btn">Save changes</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <div id="confirm-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close="confirm"></div>
