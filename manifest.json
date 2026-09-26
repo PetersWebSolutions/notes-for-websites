@@ -1,0 +1,19 @@
+{
+  "name": "TEAM ELITE PH TSHIRT",
+  "short_name": "Elite Shirts",
+  "description": "Tally Team Elite PH t-shirt sales, payments, and sizes.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e7eef6",
+  "theme_color": "#0b1f3a",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

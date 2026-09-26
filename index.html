@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#0b1f3a">
+  <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. Enter a name, size, and white or blue. Prices and the total stay on the sheet.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Elite PH Shirts">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>TEAM ELITE PH TSHIRT</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#orders">Skip to list</a>
+
+  <header class="banner">
+    <div class="wrap banner-inner">
+      <div class="brand">
+        <div class="crest" aria-hidden="true"><span>TE</span></div>
+        <div class="brand-copy">
+          <p class="eyebrow">Sales tally</p>
+          <h1>TEAM ELITE PH <span>TSHIRT</span></h1>
+          <p class="price-legend" id="price-legend">Prices in pesos: S, M, L, XL — ₱399 · 2XL — ₱449</p>
+        </div>
+      </div>
+      <div class="capacity-block">
+        <p class="capacity-count" id="header-count">0 / 300</p>
+        <p class="capacity-label">people</p>
+        <div class="meter" id="meter" role="meter" aria-valuemin="0" aria-valuemax="300" aria-valuenow="0" aria-label="People on the list">
+          <span id="meter-fill"></span>
+        </div>
+      </div>
+    </div>
+    <div class="color-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+  </header>
+
+  <p class="print-only wrap" id="print-stamp"></p>
+
+  <main class="wrap">
+    <noscript>
+      <p class="form-error">This tally needs JavaScript turned on so it can add up the prices.</p>
+    </noscript>
+
+    <form id="add-form" class="composer" autocomplete="off" novalidate>
+      <div class="composer-main">
+        <div class="composer-head">
+          <h2>Add a person</h2>
+          <p class="helper" id="spots-left">Up to 300 people</p>
+        </div>
+
+        <label class="field" for="name-input">NAME</label>
+        <input id="name-input" name="person" type="text" maxlength="80" placeholder="Full name" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done" aria-required="true" aria-describedby="name-help">
+        <p class="helper" id="name-help">One shirt per row. Add the same name again for another shirt.</p>
+        <p class="hint" id="dup-hint" hidden></p>
+
+        <fieldset class="size-picker">
+          <legend>SIZE</legend>
+          <div class="choice-row">
+            <label class="size-btn">
+              <input type="radio" name="size" value="S">
+              <span class="size-name">S</span>
+              <span class="size-price" data-price-for="S">₱399</span>
+            </label>
+            <label class="size-btn">
+              <input type="radio" name="size" value="M">
+              <span class="size-name">M</span>
+              <span class="size-price" data-price-for="M">₱399</span>
+            </label>
+            <label class="size-btn">
+              <input type="radio" name="size" value="L">
+              <span class="size-name">L</span>
+              <span class="size-price" data-price-for="L">₱399</span>
+            </label>
+            <label class="size-btn">
+              <input type="radio" name="size" value="XL">
+              <span class="size-name">XL</span>
+              <span class="size-price" data-price-for="XL">₱399</span>
+            </label>
+            <label class="size-btn is-2xl">
+              <input type="radio" name="size" value="2XL">
+              <span class="size-name">2XL</span>
+              <span class="size-price" data-price-for="2XL">₱449</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="color-picker">
+          <legend>T-SHIRT COLOR</legend>
+          <div class="choice-row colors">
+            <label class="color-btn white">
+              <input type="radio" name="color" value="white">
+              <span class="dot" aria-hidden="true"></span>
+              <span>WHITE</span>
+            </label>
+            <label class="color-btn blue">
+              <input type="radio" name="color" value="blue">
+              <span class="dot" aria-hidden="true"></span>
+              <span>BLUE</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <p class="inline-price" id="inline-price">Price: —</p>
+        <p class="form-error" id="full-banner" hidden>The list is full at 300 people. Remove someone to add another.</p>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </div>
+
+      <aside class="price-card">
+        <p class="price-kicker">Price in pesos</p>
+        <p class="shirt-price" id="shirt-price">—</p>
+        <p class="shirt-detail" id="shirt-detail">Choose a size</p>
+
+        <div class="card-total">
+          <p class="price-kicker">List total</p>
+          <p class="running-total" id="running-total">₱0</p>
+          <p class="after-add" id="after-add" hidden></p>
+        </div>
+
+        <fieldset class="pay-fieldset">
+          <legend>PAID/UNPAID</legend>
+          <div class="pay-toggle on-dark">
+            <label class="pay-option">
+              <input type="radio" name="paid" value="unpaid" checked>
+              <span>UNPAID</span>
+            </label>
+            <label class="pay-option">
+              <input type="radio" name="paid" value="paid">
+              <span>PAID</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <button type="submit" class="add-btn" id="add-btn">Add to list</button>
+      </aside>
+    </form>
+
+    <div class="toolbar no-print">
+      <label class="search-label" for="search">Search</label>
+      <input id="search" class="search" type="search" placeholder="Search name" autocomplete="off" enterkeyhint="search">
+
+      <div class="filters" role="toolbar" aria-label="Filter the list">
+        <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-filter="paid" aria-pressed="false">Paid</button>
+        <button type="button" class="chip" data-filter="unpaid" aria-pressed="false">Unpaid</button>
+        <button type="button" class="chip" data-filter="white" aria-pressed="false">White</button>
+        <button type="button" class="chip" data-filter="blue" aria-pressed="false">Blue</button>
+      </div>
+
+      <label class="select-label">Size
+        <select id="size-filter" aria-label="Filter by size">
+          <option value="all">All sizes</option>
+        </select>
+      </label>
+      <label class="select-label">Sort
+        <select id="sort-orders" aria-label="Sort the list">
+          <option value="entry">List order</option>
+          <option value="name">Name</option>
+          <option value="unpaid">Unpaid first</option>
+          <option value="size">Size</option>
+          <option value="color">Color</option>
+        </select>
+      </label>
+
+      <div class="tool-actions">
+        <button type="button" class="tool-btn" id="export-csv">Export CSV</button>
+        <button type="button" class="tool-btn" id="print-btn">Print</button>
+        <button type="button" class="tool-btn" id="backup-btn">Backup</button>
+        <button type="button" class="tool-btn" id="restore-btn">Restore</button>
+        <button type="button" class="tool-btn danger" id="clear-btn">Clear list</button>
+        <input id="restore-file" type="file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+
+    <section class="list-section" id="orders" aria-labelledby="list-title">
+      <div class="list-head">
+        <div>
+          <h2 id="list-title">People</h2>
+          <p id="result-count" class="helper">No one yet</p>
+        </div>
+        <p id="save-state" class="save-state">Saved on this device only — not uploaded.</p>
+      </div>
+      <p class="tap-hint no-print">The size goes under WHITE or BLUE. Click PAID or UNPAID to update payment.</p>
+
+      <div id="empty-state" class="empty">
+        <div class="empty-shirt" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="84" height="84">
+            <path fill="#f7f8fb" d="M16 18 24 12h16l8 6 10 4-6 10-8-4v24H20V28l-8 4-6-10z"/>
+            <path fill="#1d4ed8" d="M32 12h8l8 6 10 4-6 10-8-4v24H32z"/>
+            <path fill="none" stroke="#0b1f3a" stroke-width="2" stroke-linejoin="round" d="M16 18 24 12h16l8 6 10 4-6 10-8-4v24H20V28l-8 4-6-10z"/>
+          </svg>
+        </div>
+        <h3>No shirts listed yet</h3>
+        <p>Enter a name, size, and color. The price appears before you add them, and the total stays at the bottom.</p>
+        <ul class="price-pills">
+          <li>S · M · L · XL <strong>₱399</strong></li>
+          <li>2XL <strong>₱449</strong></li>
+        </ul>
+      </div>
+
+      <div id="no-match" class="empty" hidden>
+        <h3>No one matches</h3>
+        <p>Try another name, or clear the filters. The total below still includes everyone.</p>
+        <button type="button" class="ghost-btn" id="clear-filters">Clear filters</button>
+      </div>
+
+      <div class="sheet" id="sheet" hidden>
+        <div class="table-scroll">
+          <table id="order-table">
+            <caption class="sr-only">TEAM ELITE PH TSHIRT orders</caption>
+            <thead>
+              <tr>
+                <th rowspan="2" scope="col" class="col-name">NAME</th>
+                <th colspan="2" scope="colgroup" class="color-group">T-SHIRT COLOR</th>
+                <th rowspan="2" scope="col" class="col-price">PRICE</th>
+                <th rowspan="2" scope="col" class="col-status">PAID/UNPAID</th>
+                <th rowspan="2" scope="col" class="col-actions"><span class="sr-only">Actions</span></th>
+              </tr>
+              <tr>
+                <th scope="col" class="col-white">WHITE</th>
+                <th scope="col" class="col-blue">BLUE</th>
+              </tr>
+            </thead>
+            <tbody id="order-body"></tbody>
+            <tfoot id="order-foot"></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary" id="summary" aria-labelledby="summary-title">
+      <div class="summary-head">
+        <div>
+          <h2 id="summary-title">Total</h2>
+          <p class="helper" id="updated-at"></p>
+        </div>
+        <div class="summary-actions no-print">
+          <button type="button" class="tool-btn" id="copy-summary">Copy summary</button>
+          <button type="button" class="tool-btn" id="copy-unpaid">Copy unpaid</button>
+        </div>
+      </div>
+
+      <div class="money-grid">
+        <article class="money-card total">
+          <p>TOTAL</p>
+          <strong id="sum-total">₱0</strong>
+          <span id="sum-people">0 people</span>
+        </article>
+        <article class="money-card paid">
+          <p>PAID</p>
+          <strong id="sum-paid">₱0</strong>
+          <span id="sum-paid-count">0 paid</span>
+        </article>
+        <article class="money-card unpaid">
+          <p>UNPAID</p>
+          <strong id="sum-unpaid">₱0</strong>
+          <span id="sum-unpaid-count">0 unpaid</span>
+        </article>
+      </div>
+
+      <div class="matrix-block">
+        <h3>Count by color and size</h3>
+        <p class="helper" id="price-note">S, M, L, and XL are ₱399. 2XL is ₱449.</p>
+        <div class="matrix-scroll">
+          <table class="matrix" id="matrix"></table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="total-bar" id="total-bar" aria-label="Totals"></footer>
+
+  <div id="edit-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close="edit"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+      <div class="modal-head">
+        <h2 id="edit-title">Edit order</h2>
+        <button type="button" class="icon-x" data-close="edit" aria-label="Close">×</button>
+      </div>
+      <form id="edit-form" autocomplete="off" novalidate>
+        <input type="hidden" name="id" id="edit-id">
+        <label class="field" for="edit-name">NAME</label>
+        <input id="edit-name" name="person" type="text" maxlength="80" autocapitalize="words" autocomplete="off" required aria-required="true">
+
+        <fieldset class="size-picker">
+          <legend>SIZE</legend>
+          <div class="choice-row">
+            <label class="size-btn"><input type="radio" name="size" value="S"><span class="size-name">S</span><span class="size-price" data-price-for="S">₱399</span></label>
+            <label class="size-btn"><input type="radio" name="size" value="M"><span class="size-name">M</span><span class="size-price" data-price-for="M">₱399</span></label>
+            <label class="size-btn"><input type="radio" name="size" value="L"><span class="size-name">L</span><span class="size-price" data-price-for="L">₱399</span></label>
+            <label class="size-btn"><input type="radio" name="size" value="XL"><span class="size-name">XL</span><span class="size-price" data-price-for="XL">₱399</span></label>
+            <label class="size-btn is-2xl"><input type="radio" name="size" value="2XL"><span class="size-name">2XL</span><span class="size-price" data-price-for="2XL">₱449</span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="color-picker">
+          <legend>T-SHIRT COLOR</legend>
+          <div class="choice-row colors">
+            <label class="color-btn white"><input type="radio" name="color" value="white"><span class="dot" aria-hidden="true"></span><span>WHITE</span></label>
+            <label class="color-btn blue"><input type="radio" name="color" value="blue"><span class="dot" aria-hidden="true"></span><span>BLUE</span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="pay-fieldset on-light">
+          <legend>PAID/UNPAID</legend>
+          <div class="pay-toggle on-light">
+            <label class="pay-option"><input type="radio" name="paid" value="unpaid"><span>UNPAID</span></label>
+            <label class="pay-option"><input type="radio" name="paid" value="paid"><span>PAID</span></label>
+          </div>
+        </fieldset>
+
+        <p class="edit-price" id="edit-price">Price: —</p>
+        <p class="form-error" id="edit-error" role="alert" hidden></p>
+
+        <div class="modal-actions">
+          <button type="button" class="text-btn danger" id="edit-remove">Remove</button>
+          <span class="spacer"></span>
+          <button type="button" class="ghost-btn" id="edit-cancel">Cancel</button>
+          <button type="submit" class="primary-btn">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="confirm-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close="confirm"></div>
+    <div class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-body"></p>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="confirm-cancel">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost-btn" id="confirm-extra" hidden>Backup</button>
+        <button type="button" class="danger-btn" id="confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden role="status"></div>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+
+  <script src="tally.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
