@@ -1019,6 +1019,9 @@ main { padding: 22px 0 8px; }
 .name-wrap { min-width: 0; }
 .name-wrap > * { min-width: 0; }
 
+/* Only the phone layout shows this caret; the desktop sheet has no need. */
+.expand-btn { display: none; }
+
 .edit-btn {
   padding: 6px 10px;
   border: 1.5px solid var(--blue);
@@ -1432,7 +1435,7 @@ body.modal-open { overflow: hidden; }
   .tap-hint { font-size: 11.5px; }
 }
 
-/* Compact phone layout: each person is a two-line card. */
+/* Compact phone layout: one row per person; a caret opens the size grid. */
 @media (max-width: 720px) {
   .table-scroll { overflow: visible; }
 
@@ -1531,6 +1534,36 @@ body.modal-open { overflow: hidden; }
     border-width: 1px;
     font-size: 12.5px;
   }
+
+  /*
+   * One row per person. The fourteen size cells stay hidden until the caret
+   * opens the row, or EDIT turns them into quantity boxes.
+   */
+  #order-table tbody tr .cell-qty { display: none; }
+  #order-table tbody tr.is-open .cell-qty,
+  #order-table tbody tr.is-editing .cell-qty { display: flex; }
+
+  .expand-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    margin-left: -6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+
+  .expand-btn:active { background: rgba(11, 31, 58, 0.08); }
+
+  #order-table tbody tr.is-open .expand-btn { transform: rotate(90deg); }
 
   #order-table tbody .col-actions {
     order: 7;
