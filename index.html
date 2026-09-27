@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#0b1f3a">
-  <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. List each person, pick white and blue sizes and quantities, and the price and totals update on the sheet.">
+  <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. Add a name and orders, check the cart, then send the order to the list.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Elite PH Shirts">
@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=9f2c4a">
 </head>
 <body>
   <a class="skip" href="#orders">Skip to list</a>
@@ -52,72 +52,131 @@
       <p class="form-error">This tally needs JavaScript turned on so it can add up the prices.</p>
     </noscript>
 
-    <form id="add-form" class="add-bar" autocomplete="off" novalidate>
-      <label class="field" for="name-input">NAME</label>
-      <input id="name-input" name="person" type="text" maxlength="80" placeholder="Full name" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done" aria-required="true" aria-describedby="name-help">
-      <p class="helper" id="name-help">Add the person, then set their white and blue sizes on the row. <span id="spots-left">Up to 300 people</span></p>
-      <p class="hint" id="dup-hint" hidden></p>
-
-      <fieldset class="pay-fieldset">
-        <legend class="sr-only">PAID/UNPAID</legend>
-        <div class="pay-toggle">
-          <label class="pay-option">
-            <input type="radio" name="paid" value="unpaid" checked>
-            <span>UNPAID</span>
-          </label>
-          <label class="pay-option">
-            <input type="radio" name="paid" value="paid">
-            <span>PAID</span>
-          </label>
+    <!-- ===== 1 · NAME AND ORDERS ===== -->
+    <section class="step" id="step-order" aria-labelledby="step1-title">
+      <div class="step-head">
+        <span class="step-no" aria-hidden="true">1</span>
+        <div class="step-title">
+          <h2 id="step1-title">Name &amp; orders</h2>
+          <p class="helper">Type the name, pick one shirt, then press <strong>ADD</strong>. Press it again for every shirt the person wants.</p>
         </div>
-      </fieldset>
-
-      <button type="submit" class="add-btn" id="add-btn">Add person</button>
-      <p class="form-error" id="full-banner" hidden>The list is full at 300 people. Remove someone to add another.</p>
-      <p class="form-error" id="form-error" role="alert" hidden></p>
-    </form>
-
-    <div class="toolbar no-print">
-      <button type="button" class="tool-btn primary" id="save-btn">Save list</button>
-
-      <label class="search-label" for="search">Search</label>
-      <input id="search" class="search" type="search" placeholder="Search name" autocomplete="off" enterkeyhint="search">
-
-      <div class="filters" role="toolbar" aria-label="Filter the list">
-        <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
-        <button type="button" class="chip" data-filter="paid" aria-pressed="false">Paid</button>
-        <button type="button" class="chip" data-filter="unpaid" aria-pressed="false">Unpaid</button>
-        <button type="button" class="chip" data-filter="white" aria-pressed="false">White</button>
-        <button type="button" class="chip" data-filter="blue" aria-pressed="false">Blue</button>
       </div>
 
-      <label class="select-label">Sort
-        <select id="sort-orders" aria-label="Sort the list">
-          <option value="entry">List order</option>
-          <option value="name">Name</option>
-          <option value="unpaid">Unpaid first</option>
-        </select>
-      </label>
+      <form id="add-form" class="order-form" autocomplete="off" novalidate>
+        <div class="order-cell order-name">
+          <label class="field" for="name-input">NAME</label>
+          <input id="name-input" name="person" type="text" maxlength="80" placeholder="Full name" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="done" aria-required="true" aria-describedby="name-help">
+          <p class="hint" id="dup-hint" hidden></p>
+        </div>
 
-      <div class="tool-actions">
-        <button type="button" class="tool-btn" id="export-csv">Export CSV</button>
-        <button type="button" class="tool-btn" id="print-btn">Print</button>
-        <button type="button" class="tool-btn" id="backup-btn">Backup</button>
-        <button type="button" class="tool-btn" id="restore-btn">Restore</button>
-        <button type="button" class="tool-btn danger" id="clear-btn">Clear list</button>
-        <input id="restore-file" type="file" accept="application/json,.json" hidden>
+        <div class="order-row">
+          <fieldset class="order-cell color-fieldset">
+            <legend class="field">COLOR</legend>
+            <div class="pay-toggle" id="color-toggle">
+              <label class="pay-option">
+                <input type="radio" name="color" value="white" checked>
+                <span>WHITE</span>
+              </label>
+              <label class="pay-option">
+                <input type="radio" name="color" value="blue">
+                <span>BLUE</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="order-cell">
+            <label class="field" for="size-input">SIZE</label>
+            <select id="size-input" name="size" aria-describedby="size-help">
+              <option value="">—</option>
+            </select>
+            <p class="field-sub" id="size-help">Price follows the size</p>
+          </div>
+
+          <div class="order-cell order-qty">
+            <label class="field" for="qty-input">QTY</label>
+            <input id="qty-input" name="qty" type="number" min="1" max="99" step="1" value="1" inputmode="numeric" enterkeyhint="done" aria-label="Quantity">
+          </div>
+        </div>
+
+        <button type="submit" class="add-btn add-order-btn" id="cart-add">ADD</button>
+
+        <p class="helper order-help" id="name-help"><span id="spots-left">Up to 300 people</span></p>
+        <p class="form-error" id="full-banner" hidden>The list is full at 300 people. Remove someone to add another.</p>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <!-- ===== 2 · CART ===== -->
+    <section class="step" id="step-cart" aria-labelledby="step2-title">
+      <div class="step-head">
+        <span class="step-no" aria-hidden="true">2</span>
+        <div class="step-title">
+          <h2 id="step2-title">Cart</h2>
+          <p class="helper">The shirts for this person. When the order is final, press <strong>ADD TO LIST</strong>.</p>
+        </div>
+        <p class="cart-total" id="cart-total">₱0</p>
       </div>
-    </div>
 
-    <section class="list-section" id="orders" aria-labelledby="list-title">
-      <div class="list-head">
-        <div>
-          <h2 id="list-title">People</h2>
+      <div id="cart-empty" class="cart-empty">
+        No shirts in the cart yet. Pick a color, size and quantity in section 1, then press ADD.
+      </div>
+
+      <ul class="cart-list" id="cart-list" hidden></ul>
+
+      <div class="cart-foot">
+        <p class="cart-summary"><strong id="cart-count">0 shirts</strong></p>
+        <button type="button" class="text-btn" id="cart-clear" hidden>Empty cart</button>
+        <span class="spacer"></span>
+        <button type="button" class="add-btn add-list-btn" id="add-person-btn">ADD TO LIST</button>
+      </div>
+
+      <p class="helper cart-hint" id="cart-hint">The cart is not saved until you press ADD TO LIST.</p>
+    </section>
+
+    <!-- ===== 3 · LIST ===== -->
+    <section class="step" id="orders" aria-labelledby="step3-title">
+      <div class="step-head">
+        <span class="step-no" aria-hidden="true">3</span>
+        <div class="step-title">
+          <h2 id="step3-title">List</h2>
           <p id="result-count" class="helper">No one yet</p>
         </div>
         <p id="save-state" class="save-state">Tap Save list to store the list on this website.</p>
       </div>
-      <p class="tap-hint no-print">Each row is one person. Set a size and quantity under WHITE or BLUE, add extra 3XL / 4XL shirts, and click PAID or UNPAID to update payment.</p>
+
+      <div class="toolbar no-print">
+        <button type="button" class="tool-btn primary" id="save-btn">Save list</button>
+
+        <label class="search-label" for="search">Search</label>
+        <input id="search" class="search" type="search" placeholder="Search name" autocomplete="off" enterkeyhint="search">
+
+        <div class="filters" role="toolbar" aria-label="Filter the list">
+          <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+          <button type="button" class="chip" data-filter="paid" aria-pressed="false">Paid</button>
+          <button type="button" class="chip" data-filter="unpaid" aria-pressed="false">Unpaid</button>
+          <button type="button" class="chip" data-filter="white" aria-pressed="false">White</button>
+          <button type="button" class="chip" data-filter="blue" aria-pressed="false">Blue</button>
+        </div>
+
+        <label class="select-label">Sort
+          <select id="sort-orders" aria-label="Sort the list">
+            <option value="entry">List order</option>
+            <option value="name">Name</option>
+            <option value="unpaid">Unpaid first</option>
+          </select>
+        </label>
+
+        <div class="tool-actions">
+          <button type="button" class="tool-btn" id="export-csv">Export CSV</button>
+          <button type="button" class="tool-btn" id="print-btn">Print</button>
+          <button type="button" class="tool-btn" id="backup-btn">Backup</button>
+          <button type="button" class="tool-btn" id="restore-btn">Restore</button>
+          <button type="button" class="tool-btn danger" id="clear-btn">Clear list</button>
+          <input id="restore-file" type="file" accept="application/json,.json" hidden>
+        </div>
+      </div>
+
+      <p class="tap-hint no-print">One row per person. The sheet is read only — press <strong>EDIT</strong> on a row to change a quantity, then press <strong>DONE</strong>. PAID and UNPAID can be tapped at any time.</p>
 
       <div id="empty-state" class="empty">
         <div class="empty-shirt" aria-hidden="true">
@@ -128,7 +187,7 @@
           </svg>
         </div>
         <h3>No shirts listed yet</h3>
-        <p>Enter a name above to add a person. Their row has a size menu for white and for blue, each with its own quantity.</p>
+        <p>Fill in section 1, build the cart in section 2, then press ADD TO LIST. The name and every shirt land on one row here.</p>
         <ul class="price-pills">
           <li>S · M · L · XL <strong>₱399</strong></li>
           <li>2XL · 3XL · 4XL <strong>₱449</strong></li>
@@ -145,65 +204,58 @@
         <div class="table-scroll">
           <table id="order-table">
             <caption class="sr-only">TEAM ELITE PH TSHIRT orders</caption>
-            <thead>
-              <tr>
-                <th rowspan="2" scope="col" class="col-name">NAME</th>
-                <th colspan="2" scope="colgroup" class="color-group">T-SHIRT COLOR</th>
-                <th rowspan="2" scope="col" class="col-xl3">3XL</th>
-                <th rowspan="2" scope="col" class="col-xl4">4XL</th>
-                <th rowspan="2" scope="col" class="col-price">PRICE</th>
-                <th rowspan="2" scope="col" class="col-status">PAID/UNPAID</th>
-                <th rowspan="2" scope="col" class="col-actions"><span class="sr-only">Actions</span></th>
-              </tr>
-              <tr>
-                <th scope="col" class="col-white">WHITE</th>
-                <th scope="col" class="col-blue">BLUE</th>
-              </tr>
-            </thead>
+            <colgroup id="order-cols"></colgroup>
+            <thead id="order-head"></thead>
             <tbody id="order-body"></tbody>
             <tfoot id="order-foot"></tfoot>
           </table>
         </div>
       </div>
-    </section>
 
-    <section class="summary" id="summary" aria-labelledby="summary-title">
-      <div class="summary-head">
-        <div>
-          <h2 id="summary-title">Total</h2>
-          <p class="helper" id="updated-at"></p>
+      <!-- the tally at the bottom of the list -->
+      <div class="list-totals" id="summary" aria-labelledby="summary-title">
+        <h3 id="summary-title" class="totals-title">Tally</h3>
+
+        <div class="stat-row">
+          <article class="stat total">
+            <p>TOTAL</p>
+            <strong id="sum-total">₱0</strong>
+            <span id="sum-people">0 people</span>
+          </article>
+          <article class="stat shirts">
+            <p>SHIRTS</p>
+            <strong id="sum-shirts">0</strong>
+            <span>counted on the sheet</span>
+          </article>
+          <article class="stat paid">
+            <p>PAID</p>
+            <strong id="sum-paid">₱0</strong>
+            <span id="sum-paid-count">0 paid</span>
+          </article>
+          <article class="stat unpaid">
+            <p>UNPAID</p>
+            <strong id="sum-unpaid">₱0</strong>
+            <span id="sum-unpaid-count">0 unpaid</span>
+          </article>
         </div>
-        <div class="summary-actions no-print">
-          <button type="button" class="tool-btn" id="copy-summary">Copy summary</button>
-          <button type="button" class="tool-btn" id="copy-unpaid">Copy unpaid</button>
+
+        <div class="matrix-block">
+          <h4>Count by color and size</h4>
+          <p class="helper" id="price-note">S, M, L, and XL are ₱399. 2XL, 3XL, and 4XL are ₱449.</p>
+          <div class="matrix-scroll">
+            <table class="matrix" id="matrix"></table>
+          </div>
         </div>
+
+        <p class="helper totals-foot" id="updated-at"></p>
       </div>
 
-      <div class="money-grid">
-        <article class="money-card total">
-          <p>TOTAL</p>
-          <strong id="sum-total">₱0</strong>
-          <span id="sum-people">0 people · 0 shirts</span>
-        </article>
-        <article class="money-card paid">
-          <p>PAID</p>
-          <strong id="sum-paid">₱0</strong>
-          <span id="sum-paid-count">0 paid</span>
-        </article>
-        <article class="money-card unpaid">
-          <p>UNPAID</p>
-          <strong id="sum-unpaid">₱0</strong>
-          <span id="sum-unpaid-count">0 unpaid</span>
-        </article>
+      <div class="summary-actions no-print">
+        <button type="button" class="tool-btn" id="copy-summary">Copy summary</button>
+        <button type="button" class="tool-btn" id="copy-unpaid">Copy unpaid</button>
       </div>
 
-      <div class="matrix-block">
-        <h3>Count by color and size</h3>
-        <p class="helper" id="price-note">S, M, L, and XL are ₱399. 2XL, 3XL, and 4XL are ₱449.</p>
-        <div class="matrix-scroll">
-          <table class="matrix" id="matrix"></table>
-        </div>
-      </div>
+      <p class="build-tag" id="build-tag" title="Which build of the page is running"></p>
     </section>
   </main>
 
@@ -226,7 +278,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js"></script>
-  <script src="app.js"></script>
+  <script src="tally.js?v=9f2c4a"></script>
+  <script src="app.js?v=9f2c4a"></script>
 </body>
 </html>

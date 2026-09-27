@@ -1,16 +1,30 @@
 "use strict";
 
+/*
+ * Bump this whenever app.js changes. It is printed at the bottom of the list
+ * so a screenshot always says which build is actually running, and it matches
+ * the ?v= token on the script tags in index.html.
+ */
+const BUILD = "9f2c4a";
+
 const Tally = window.Tally;
 const STORAGE_KEY = "team-elite-ph-tshirt-people-v2";
 const LEGACY_KEY = "team-elite-ph-tshirt-orders-v1";
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
+const sizeInput = document.getElementById("size-input");
+const qtyInput = document.getElementById("qty-input");
 const searchInput = document.getElementById("search");
 const sortEl = document.getElementById("sort-orders");
 const toastEl = document.getElementById("toast");
 const liveEl = document.getElementById("live");
 const tbody = document.getElementById("order-body");
+
+/* Shirts waiting to be attached to a person. */
+let cart = [];
+/* The one row whose quantities can be changed right now, or null. */
+let editingId = null;
 
 let people = [];
 let filter = "all";
@@ -77,23 +91,12 @@ function getRadio(form, name) {
   return form.querySelector(`input[name="${name}"]:checked`)?.value || "";
 }
 
-function setRadio(form, name, value) {
-  form.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
-    input.checked = input.value === value;
-  });
-}
-
 function findPerson(id) {
   return people.find((person) => person.id === id) || null;
 }
 
-function describePerson(person) {
-  const parts = [];
-  if (Tally.hasColorOrder(person.white)) parts.push(`white ${person.white.size} ×${person.white.qty}`);
-  if (Tally.hasColorOrder(person.blue)) parts.push(`blue ${person.blue.size} ×${person.blue.qty}`);
-  if (person.xl3) parts.push(`3XL ×${person.xl3}`);
-  if (person.xl4) parts.push(`4XL ×${person.xl4}`);
-  return parts.join(" · ") || "no shirts yet";
+function hasColor(person, color) {
+  return Tally.normalizeItems(person.items).some((item) => item.color === color);
 }
 
 /* ---------- storage ---------- */
@@ -112,6 +115,10 @@ function loadPeople() {
         else skipped += 1;
       });
       if (skipped) pendingNotice = "Some saved rows were skipped because they were incomplete.";
+      if (restored.length) {
+        pendingNotice = pendingNotice
+          || "Your saved list now uses one row per person with every shirt in the size grid.";
+      }
       return restored.slice(0, Tally.MAX_PEOPLE);
     }
 
@@ -193,6 +200,198 @@ function hideToast() {
   toastEl.replaceChildren();
 }
 
+function setFormError(id, message) {
+  const el = document.getElementById(id);
+  el.hidden = !message;
+  el.textContent = message || "";
+  if (message && typeof el.scrollIntoView === "function") {
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+/* ---------- the order form and the cart ---------- */
+
+function fillSizeOptions() {
+  sizeInput.append(h("option", { value: "", text: "—" }));
+  Tally.SIZES.forEach((size) => sizeInput.append(
+    h("option", { value: size, text: size })
+  ));
+  sizeInput.addEventListener("change", updateSizeHelp);
+  updateSizeHelp();
+}
+
+function updateSizeHelp() {
+  const size = sizeInput.value;
+  const help = document.getElementById("size-help");
+  help.textContent = Tally.isSize(size)
+    ? `${Tally.formatPesos(Tally.priceFor(size))} each`
+    : "Price follows the size";
+}
+
+function addToCart(event) {
+  event.preventDefault();
+  const size = sizeInput.value;
+  if (!Tally.isSize(size)) {
+    setFormError("form-error", "Pick a size from S to 4XL first.");
+    sizeInput.focus();
+    return;
+  }
+  const color = getRadio(addForm, "color") === "blue" ? "blue" : "white";
+  const qty = Math.max(1, Tally.clampQty(qtyInput.value) || 1);
+
+  cart = Tally.addItem(cart, { color, size, qty });
+  setFormError("form-error", "");
+  renderCart();
+  announce(`${colorLabel(color)} ${size} ×${qty} added to the cart. ${Tally.shirtsLabel(Tally.itemsShirts(cart))} in the cart.`);
+  qtyInput.value = "1";
+  qtyInput.focus();
+}
+
+function addPersonToList() {
+  if (people.length >= Tally.MAX_PEOPLE) {
+    setFormError("form-error", "The list is full at 300 people. Remove someone to add another.");
+    return;
+  }
+  const name = Tally.cleanName(nameInput.value);
+  if (!Tally.isValidName(name)) {
+    setFormError("form-error", "Enter the person's name before adding them to the list.");
+    nameInput.focus();
+    return;
+  }
+  if (!cart.length) {
+    setFormError("form-error", "Add at least one shirt with the ADD button first.");
+    sizeInput.focus();
+    return;
+  }
+
+  const dup = people.some((person) => person.name.toLowerCase() === name.toLowerCase());
+  if (dup && addForm.dataset.confirmDup !== "1") {
+    addForm.dataset.confirmDup = "1";
+    setFormError("form-error", `${name} is already on the list. Press ADD TO LIST again to add another person with the same name.`);
+    return;
+  }
+
+  const items = Tally.normalizeItems(cart);
+  const person = {
+    id: uid(),
+    name,
+    items,
+    paid: false,
+    createdAt: Date.now()
+  };
+  people.push(person);
+  const count = items.length;
+  cart = [];
+  nameInput.value = "";
+  sizeInput.value = "";
+  qtyInput.value = "1";
+  delete addForm.dataset.confirmDup;
+  savePeople();
+  highlightId = person.id;
+  editingId = null;
+  render({ keepScroll: false });
+  setFormError("form-error", "");
+  updateDupHint("");
+  updateSizeHelp();
+  renderCart();
+  const summary = Tally.summarize(people);
+  announce(`Added ${person.name} with ${count} ${count === 1 ? "shirt" : "shirts"}. ${Tally.peopleLabel(summary.count)} on the list, ${Tally.shirtsLabel(summary.shirts)}.`);
+  const hiddenByFilter = isFiltered() && !visiblePeople().some((item) => item.id === person.id);
+  if (hiddenByFilter) showToast(`Added ${person.name}. Clear the filter to see them in the list.`);
+  nameInput.focus();
+}
+
+function clearCart() {
+  if (!cart.length) return;
+  const shirts = Tally.itemsShirts(cart);
+  cart = [];
+  renderCart();
+  announce(`Cart emptied. ${Tally.shirtsLabel(shirts)} removed.`);
+  sizeInput.focus();
+}
+
+function renderCart() {
+  const items = Tally.normalizeItems(cart);
+  const list = document.getElementById("cart-list");
+
+  document.getElementById("cart-count").textContent = Tally.shirtsLabel(Tally.itemsShirts(items));
+  document.getElementById("cart-total").textContent = Tally.formatPesos(Tally.itemsPrice(items));
+  document.getElementById("cart-empty").hidden = items.length > 0;
+  document.getElementById("cart-clear").hidden = items.length === 0;
+  list.hidden = items.length === 0;
+  list.replaceChildren(...items.map((item) => {
+    const key = `${item.color}|${item.size}`;
+    return h("li", { class: "cart-item" },
+      h("span", { class: `cart-swatch is-${item.color}`, "aria-hidden": "true" }),
+      h("span", { class: "cart-color", text: colorLabel(item.color, true) }),
+      h("span", { class: "cart-size", text: item.size }),
+      h("span", { class: "cart-x", text: "×" }),
+      h("input", {
+        class: "cart-qty",
+        type: "number",
+        min: "0",
+        max: String(Tally.MAX_QTY),
+        step: "1",
+        inputmode: "numeric",
+        value: String(item.qty),
+        "data-cart-item": key,
+        "aria-label": `${colorLabel(item.color)} ${item.size} quantity`
+      }),
+      h("span", {
+        class: "cart-amount",
+        text: Tally.formatPesos(item.qty * Tally.priceFor(item.size))
+      }),
+      h("button", {
+        type: "button",
+        class: "cart-remove",
+        "data-cart-remove": key,
+        "aria-label": `Remove ${colorLabel(item.color)} ${item.size} from the cart`,
+        title: "Remove",
+        text: "×"
+      })
+    );
+  }));
+
+  const name = Tally.cleanName(nameInput.value);
+  document.getElementById("cart-hint").textContent = items.length
+    ? `Press ADD TO LIST to put ${Tally.isValidName(name) ? name : "this name"} on the people list.`
+    : "The cart is not saved until you press ADD TO LIST.";
+}
+
+function onCartChange(event) {
+  const key = event.target.dataset && event.target.dataset.cartItem;
+  if (!key) return;
+  const [color, size] = key.split("|");
+  cart = Tally.setCellQty(cart, color, size, event.target.value);
+  renderCart();
+}
+
+function onCartClick(event) {
+  const button = event.target.closest("[data-cart-remove]");
+  if (!button) return;
+  const [color, size] = button.dataset.cartRemove.split("|");
+  cart = Tally.setCellQty(cart, color, size, 0);
+  renderCart();
+  announce(`${colorLabel(color)} ${size} removed from the cart.`);
+}
+
+function updateDupHint(name) {
+  const hint = document.getElementById("dup-hint");
+  const matches = name
+    ? people.filter((person) => person.name.toLowerCase() === name.toLowerCase())
+    : [];
+  if (!matches.length) {
+    hint.hidden = true;
+    hint.textContent = "";
+    return;
+  }
+  const detail = matches.map((person) => Tally.describePerson(person)).join("; ");
+  hint.hidden = false;
+  hint.textContent = matches.length === 1
+    ? `Already on the list: ${detail}.`
+    : `Already on the list ${matches.length} times: ${detail}.`;
+}
+
 /* ---------- list ---------- */
 
 function isFiltered() {
@@ -205,8 +404,8 @@ function visiblePeople() {
   if (q) list = list.filter((person) => person.name.toLowerCase().includes(q));
   if (filter === "paid") list = list.filter((person) => person.paid);
   if (filter === "unpaid") list = list.filter((person) => !person.paid);
-  if (filter === "white") list = list.filter((person) => Tally.hasColorOrder(person.white));
-  if (filter === "blue") list = list.filter((person) => Tally.hasColorOrder(person.blue));
+  if (filter === "white") list = list.filter((person) => hasColor(person, "white"));
+  if (filter === "blue") list = list.filter((person) => hasColor(person, "blue"));
 
   const byTime = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
   if (sortMode === "name") {
@@ -221,69 +420,93 @@ function entryNumber(person) {
   return people.findIndex((item) => item.id === person.id) + 1;
 }
 
-function buildSizeSelect(person, color) {
-  const select = h("select", {
-    class: "size-select",
-    "data-field": `${color}-size`,
-    "aria-label": `${colorLabel(color)} size`
-  });
-  select.append(h("option", { value: "", text: "—" }));
-  Tally.SIZES.forEach((size) => select.append(h("option", { value: size, text: size })));
-  select.value = person[color].size;
-  return select;
+/*
+ * The column widths. A <colgroup> plus table-layout:fixed in the CSS is what
+ * keeps every row lined up: the name is always column one, in the header, in
+ * every person row and in the footer. With the automatic table layout the
+ * browser would guess the widths from the cell content and the name column
+ * would drift into the size grid.
+ */
+function buildCols() {
+  const col = (cls) => h("col", { class: cls });
+  const sizeCols = () => Tally.SIZES.map(() => col("col-size"));
+  document.getElementById("order-cols").replaceChildren(
+    col("col-name"),
+    ...sizeCols(),
+    ...sizeCols(),
+    col("col-price"),
+    col("col-status"),
+    col("col-actions")
+  );
 }
 
-function splitColorField(person, field) {
-  const color = field.startsWith("white") ? "white" : "blue";
-  return person[color].qty;
+function buildHead() {
+  const sizeCells = (color) => Tally.SIZES.map((size) => h("th", {
+    scope: "col",
+    class: `cell-qty sz-${color}`,
+    "data-size": size
+  },
+    h("span", { class: "sz-name", text: size }),
+    h("span", { class: "sz-price", text: Tally.formatPesos(Tally.priceFor(size)) })
+  ));
+
+  document.getElementById("order-head").replaceChildren(
+    h("tr", {},
+      h("th", { rowspan: "2", scope: "col", class: "col-name", text: "NAME" }),
+      h("th", { colspan: String(Tally.SIZES.length), scope: "colgroup", class: "color-group group-white", text: "WHITE" }),
+      h("th", { colspan: String(Tally.SIZES.length), scope: "colgroup", class: "color-group group-blue", text: "BLUE" }),
+      h("th", { rowspan: "2", scope: "col", class: "col-price", text: "PRICE" }),
+      h("th", { rowspan: "2", scope: "col", class: "col-status", text: "PAID/UNPAID" }),
+      h("th", { rowspan: "2", scope: "col", class: "col-actions" }, h("span", { class: "sr-only", text: "Actions" }))
+    ),
+    h("tr", {}, ...sizeCells("white"), ...sizeCells("blue"))
+  );
 }
 
-function colorCell(person, color) {
-  const cell = h("td", { class: `col-${color}`, "data-label": colorLabel(color, true) });
-  const wrap = h("div", { class: "cell-order" });
-  const select = buildSizeSelect(person, color);
-  const qty = h("input", {
-    class: "qty-input",
-    type: "number",
-    min: "0",
-    max: String(Tally.MAX_QTY),
-    inputmode: "numeric",
-    "data-field": `${color}-qty`,
-    "aria-label": `${colorLabel(color)} quantity`
+/*
+ * One cell of the size grid. Read only until EDIT is pressed on the row,
+ * which is the only time a quantity can be changed.
+ */
+function qtyCell(person, color, size, value, editing) {
+  const key = `${color}|${size}`;
+  const cell = h("td", {
+    class: `cell-qty sz-${color}${value ? "" : " is-zero"}`,
+    "data-label": size,
+    "data-cell": key
   });
-  qty.value = String(person[color].qty);
-  qty.disabled = !person[color].size;
-  wrap.append(select, qty);
-  cell.append(wrap);
-  return cell;
-}
 
-function extraCell(person, field, label) {
-  const cell = h("td", { class: `col-${field}`, "data-label": label });
-  const qty = h("input", {
-    class: "qty-input",
-    type: "number",
-    min: "0",
-    max: String(Tally.MAX_QTY),
-    inputmode: "numeric",
-    "data-field": field,
-    "aria-label": `Extra ${label} quantity`
-  });
-  qty.value = String(person[field]);
-  cell.append(qty);
+  if (editing) {
+    cell.append(h("input", {
+      class: "qty-input",
+      type: "number",
+      min: "0",
+      max: String(Tally.MAX_QTY),
+      step: "1",
+      inputmode: "numeric",
+      value: String(value || 0),
+      "data-cell-input": key,
+      "aria-label": `${colorLabel(color)} ${size} quantity for ${person.name}`
+    }));
+  } else {
+    cell.append(h("span", { class: "qty-figure", text: value ? String(value) : "" }));
+  }
   return cell;
 }
 
 function renderRow(person) {
+  const editing = editingId === person.id;
+  const grid = Tally.personGrid(person);
   const row = h("tr", {
     "data-id": person.id,
-    class: `${person.paid ? "is-paid" : "is-unpaid"}${person.id === highlightId ? " is-new" : ""}`
+    class: `${person.paid ? "is-paid" : "is-unpaid"}${editing ? " is-editing" : ""}${person.id === highlightId ? " is-new" : ""}`
   });
 
   const nameCell = h("th", { scope: "row", class: "col-name", "data-label": "NAME" });
-  nameCell.append(h("div", { class: "name-wrap" },
-    h("span", { class: "num", text: String(entryNumber(person)).padStart(3, "0") }),
-    h("input", {
+  const nameWrap = h("div", { class: "name-wrap" },
+    h("span", { class: "num", text: String(entryNumber(person)).padStart(3, "0") })
+  );
+  if (editing) {
+    nameWrap.append(h("input", {
       class: "name-input",
       type: "text",
       maxlength: "80",
@@ -293,8 +516,17 @@ function renderRow(person) {
       autocapitalize: "words",
       autocomplete: "off",
       spellcheck: "false"
-    })
-  ));
+    }));
+  } else {
+    nameWrap.append(h("span", { class: "name-text", text: person.name }));
+  }
+  nameCell.append(nameWrap);
+  /* The name is the first column, so it has to be in the row before the grid. */
+  row.append(nameCell);
+
+  Tally.COLORS.forEach((color) => {
+    Tally.SIZES.forEach((size) => row.append(qtyCell(person, color, size, grid[color][size], editing)));
+  });
 
   const status = h("td", { class: "col-status", "data-label": "PAID/UNPAID" });
   status.append(h("button", {
@@ -306,22 +538,27 @@ function renderRow(person) {
     text: person.paid ? "PAID" : "UNPAID"
   }));
 
-  const actions = h("td", { class: "col-actions no-print", "data-label": "Actions" });
-  actions.append(h("button", {
-    type: "button",
-    class: "remove-btn",
-    "data-action": "remove",
-    "aria-label": `Remove ${person.name}`,
-    title: "Remove",
-    text: "×"
-  }));
+  const actions = h("td", { class: "col-actions no-print", "data-label": "EDIT" });
+  actions.append(
+    h("button", {
+      type: "button",
+      class: `edit-btn${editing ? " is-done" : ""}`,
+      "data-action": "edit",
+      "aria-pressed": editing ? "true" : "false",
+      "aria-label": editing ? `Finish editing ${person.name}` : `Edit the quantities for ${person.name}`,
+      text: editing ? "DONE" : "EDIT"
+    }),
+    h("button", {
+      type: "button",
+      class: "remove-btn",
+      "data-action": "remove",
+      "aria-label": `Remove ${person.name}`,
+      title: "Remove",
+      text: "×"
+    })
+  );
 
   row.append(
-    nameCell,
-    colorCell(person, "white"),
-    colorCell(person, "blue"),
-    extraCell(person, "xl3", "3XL"),
-    extraCell(person, "xl4", "4XL"),
     h("td", { class: "col-price", "data-label": "PRICE" },
       h("span", { class: "price-figure", text: Tally.formatPesos(Tally.personPrice(person)) })),
     status,
@@ -330,28 +567,47 @@ function renderRow(person) {
   return row;
 }
 
-function updatePriceCell(row, person) {
-  const figure = row.querySelector(".price-figure");
-  if (figure) figure.textContent = Tally.formatPesos(Tally.personPrice(person));
+/* Keep the caret where it was when a row redraws after an edit. */
+function captureFocus() {
+  const active = document.activeElement;
+  if (!active || !active.dataset) return null;
+  const cell = active.dataset.cellInput;
+  const field = active.dataset.field;
+  if (!cell && !field) return null;
+  return {
+    cell,
+    field,
+    rowId: active.closest("tr") ? active.closest("tr").dataset.id : null
+  };
 }
 
-function syncColorInputs(row, person, color) {
-  const select = row.querySelector(`[data-field="${color}-size"]`);
-  const qty = row.querySelector(`[data-field="${color}-qty"]`);
-  if (select) select.value = person[color].size;
-  if (qty) {
-    qty.value = String(person[color].qty);
-    qty.disabled = !person[color].size;
+function restoreFocus(mark) {
+  if (!mark || !mark.rowId) return;
+  const row = tbody.querySelector(`tr[data-id="${mark.rowId}"]`);
+  if (!row) return;
+  const target = mark.cell
+    ? row.querySelector(`[data-cell-input="${mark.cell}"]`)
+    : row.querySelector(`[data-field="${mark.field}"]`);
+  if (!target) return;
+  target.focus();
+  if (typeof target.select === "function") {
+    try { target.select(); } catch (error) { /* not every input can select */ }
   }
 }
 
 function renderTable() {
+  const mark = captureFocus();
   const shown = visiblePeople();
   document.getElementById("empty-state").hidden = people.length !== 0;
   document.getElementById("no-match").hidden = people.length === 0 || shown.length !== 0;
   document.getElementById("sheet").hidden = shown.length === 0;
   tbody.replaceChildren(...shown.map(renderRow));
   highlightId = null;
+  restoreFocus(mark);
+}
+
+function footCell(color, size, value) {
+  return h("td", { class: `cell-qty sz-${color}${value ? "" : " is-zero"}`, "data-label": size, text: String(value) });
 }
 
 function renderFoot(shown, full) {
@@ -373,12 +629,12 @@ function renderFoot(shown, full) {
     h("span", { class: "foot-note", text: `${summary.unpaidCount} unpaid` })
   );
 
+  const cells = Tally.COLORS.flatMap((color) =>
+    Tally.SIZES.map((size) => footCell(color, size, summary.grid[color][size])));
+
   foot.replaceChildren(h("tr", {},
     name,
-    h("td", { class: "col-white", "data-label": "WHITE", text: String(summary.colorCount.white) }),
-    h("td", { class: "col-blue", "data-label": "BLUE", text: String(summary.colorCount.blue) }),
-    h("td", { class: "col-xl3", "data-label": "3XL", text: String(summary.extras["3XL"]) }),
-    h("td", { class: "col-xl4", "data-label": "4XL", text: String(summary.extras["4XL"]) }),
+    ...cells,
     h("td", { class: "col-price", "data-label": "PRICE" }, h("span", { class: "total-figure", text: Tally.formatPesos(summary.total) })),
     status,
     h("td", { class: "col-actions no-print", "data-label": "" })
@@ -395,22 +651,16 @@ function renderMatrix(summary) {
     h("th", { class: "row-label", scope: "col", text: "T-SHIRT COLOR" }),
     ...Tally.SIZES.map((size) => h("th", { scope: "col" },
       h("span", { class: "mx-size", text: size }),
-      h("span", { class: "mx-price", text: Tally.formatPesos(Tally.PRICES[size]) })
+      h("span", { class: "mx-price", text: Tally.formatPesos(Tally.priceFor(size)) })
     )),
     h("th", { scope: "col", text: "SHIRTS" }),
     h("th", { scope: "col", text: "AMOUNT" })
   ));
 
   function row(label, color) {
-    const count = color === "extra"
-      ? summary.colorCount.extra
-      : color ? summary.colorCount[color] : summary.shirts;
-    const amount = color === "extra"
-      ? summary.colorAmount.extra
-      : color ? summary.colorAmount[color] : summary.total;
-    const cells = Tally.SIZES.map((size) => color === "extra"
-      ? countCell(summary.extras[size])
-      : color ? countCell(summary.grid[color][size]) : countCell(summary.sizeCount[size]));
+    const count = color ? summary.colorCount[color] : summary.shirts;
+    const amount = color ? summary.colorAmount[color] : summary.total;
+    const cells = Tally.SIZES.map((size) => countCell(color ? summary.grid[color][size] : summary.sizeCount[size]));
     return h("tr", { class: color ? `${color}-row` : "total-row" },
       h("td", { class: "row-label", text: label }),
       ...cells,
@@ -422,16 +672,16 @@ function renderMatrix(summary) {
   table.replaceChildren(head, h("tbody", {},
     row("WHITE", "white"),
     row("BLUE", "blue"),
-    row("3XL/4XL EXTRA", "extra"),
     row("TOTAL", null)
   ));
 }
 
 function renderSummary(summary) {
   document.getElementById("sum-total").textContent = Tally.formatPesos(summary.total);
+  document.getElementById("sum-shirts").textContent = String(summary.shirts);
   document.getElementById("sum-paid").textContent = Tally.formatPesos(summary.paid);
   document.getElementById("sum-unpaid").textContent = Tally.formatPesos(summary.unpaid);
-  document.getElementById("sum-people").textContent = `${Tally.peopleLabel(summary.count)} · ${Tally.shirtsLabel(summary.shirts)}`;
+  document.getElementById("sum-people").textContent = Tally.peopleLabel(summary.count);
   document.getElementById("sum-paid-count").textContent = `${summary.paidCount} paid`;
   document.getElementById("sum-unpaid-count").textContent = `${summary.unpaidCount} unpaid`;
   document.getElementById("updated-at").textContent = isFiltered()
@@ -440,7 +690,7 @@ function renderSummary(summary) {
       ? `Full list · updated ${stamp()}`
       : "Full list · no one added yet";
   document.getElementById("price-note").textContent =
-    `S, M, L, and XL are ${Tally.formatPesos(Tally.PRICES.S)}. 2XL, 3XL, and 4XL are ${Tally.formatPesos(Tally.PRICES["2XL"])}. The 3XL and 4XL columns are extra shirts at ${Tally.formatPesos(Tally.PRICES["3XL"])} each.`;
+    `S, M, L, and XL are ${Tally.formatPesos(Tally.PRICES.S)} each. 2XL, 3XL, and 4XL are ${Tally.formatPesos(Tally.PRICES["2XL"])} each.`;
   renderMatrix(summary);
 
   const empty = people.length === 0;
@@ -483,13 +733,15 @@ function renderMeta(summary) {
   document.getElementById("head-people").textContent = String(summary.count);
   document.getElementById("head-shirts").textContent = String(summary.shirts);
 
+  const full = people.length >= Tally.MAX_PEOPLE;
   const left = Tally.MAX_PEOPLE - people.length;
-  document.getElementById("spots-left").textContent = left === 0
+  document.getElementById("spots-left").textContent = full
     ? "Up to 300 people — list is full"
     : `Up to 300 people · ${left} ${left === 1 ? "spot" : "spots"} left`;
-  document.getElementById("full-banner").hidden = left !== 0;
-  document.getElementById("add-btn").disabled = left === 0;
-  document.getElementById("add-btn").textContent = left === 0 ? "List is full" : "Add person";
+  document.getElementById("full-banner").hidden = !full;
+  document.getElementById("cart-add").disabled = full;
+  document.getElementById("add-person-btn").disabled = full;
+  document.getElementById("add-person-btn").textContent = full ? "List is full" : "ADD TO LIST";
 
   const shown = visiblePeople();
   document.getElementById("result-count").textContent = isFiltered()
@@ -527,84 +779,7 @@ function render(options = {}) {
   }
 }
 
-function setText(id, text) {
-  const el = document.getElementById(id);
-  if (el.textContent !== text) el.textContent = text;
-}
-
-function setFormError(id, message) {
-  const el = document.getElementById(id);
-  el.hidden = !message;
-  el.textContent = message || "";
-  if (message && typeof el.scrollIntoView === "function") {
-    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-}
-
-function updateDupHint(name) {
-  const hint = document.getElementById("dup-hint");
-  const matches = name
-    ? people.filter((person) => person.name.toLowerCase() === name.toLowerCase())
-    : [];
-  if (!matches.length) {
-    hint.hidden = true;
-    hint.textContent = "";
-    return;
-  }
-  const detail = matches.map((person) => describePerson(person)).join("; ");
-  hint.hidden = false;
-  hint.textContent = matches.length === 1
-    ? `Already on the list: ${detail}.`
-    : `Already on the list ${matches.length} times: ${detail}.`;
-}
-
-/* ---------- actions ---------- */
-
-function addPerson(event) {
-  event.preventDefault();
-  if (people.length >= Tally.MAX_PEOPLE) {
-    setFormError("form-error", "The list is full at 300 people. Remove someone to add another.");
-    return;
-  }
-  const name = Tally.cleanName(nameInput.value);
-  if (!Tally.isValidName(name)) {
-    setFormError("form-error", "Enter the person's name.");
-    nameInput.focus();
-    return;
-  }
-
-  const dup = people.some((person) => person.name.toLowerCase() === name.toLowerCase());
-  if (dup && addForm.dataset.confirmDup !== "1") {
-    addForm.dataset.confirmDup = "1";
-    setFormError("form-error", `${name} is already on the list. Press Add anyway to add another person.`);
-    return;
-  }
-
-  const person = {
-    id: uid(),
-    name,
-    white: Tally.emptyColor(),
-    blue: Tally.emptyColor(),
-    xl3: 0,
-    xl4: 0,
-    paid: getRadio(addForm, "paid") === "paid",
-    createdAt: Date.now()
-  };
-  people.push(person);
-  savePeople();
-  delete addForm.dataset.confirmDup;
-  nameInput.value = "";
-  setRadio(addForm, "paid", "unpaid");
-  highlightId = person.id;
-  render({ keepScroll: false });
-  setFormError("form-error", "");
-  updateDupHint("");
-  const summary = Tally.summarize(people);
-  announce(`Added ${person.name}. ${Tally.peopleLabel(summary.count)} on the list, ${Tally.shirtsLabel(summary.shirts)}.`);
-  const hiddenByFilter = isFiltered() && !visiblePeople().some((item) => item.id === person.id);
-  if (hiddenByFilter) showToast(`Added ${person.name}. Clear the filter to see them in the list.`);
-  nameInput.focus();
-}
+/* ---------- row actions ---------- */
 
 function togglePaid(id) {
   const person = findPerson(id);
@@ -616,10 +791,29 @@ function togglePaid(id) {
   announce(`${person.name} marked ${person.paid ? "paid" : "unpaid"}. Unpaid ${Tally.formatPesos(summary.unpaid)}. Total ${Tally.formatPesos(summary.total)}.`);
 }
 
+function toggleEdit(id) {
+  if (editingId === id) {
+    editingId = null;
+    savePeople();
+    render();
+    announce("Finished editing. Quantities are read only again.");
+    return;
+  }
+  editingId = id;
+  render();
+  const person = findPerson(id);
+  if (person) {
+    announce(`Editing ${person.name}. Change any quantity, then press DONE.`);
+    const first = tbody.querySelector(`tr[data-id="${id}"] [data-cell-input]`);
+    if (first) first.focus();
+  }
+}
+
 function removePerson(id) {
   const index = people.findIndex((item) => item.id === id);
   if (index < 0) return;
   const [removed] = people.splice(index, 1);
+  if (editingId === id) editingId = null;
   savePeople();
   render();
   announce(`Removed ${removed.name}.`);
@@ -631,75 +825,45 @@ function removePerson(id) {
   });
 }
 
-function setQtyField(person, field, rawValue) {
-  if (field === "white-qty" || field === "blue-qty") {
-    const color = field.startsWith("white") ? "white" : "blue";
-    person[color].qty = person[color].size ? Tally.clampQty(rawValue) : 0;
-  } else if (field === "xl3" || field === "xl4") {
-    person[field] = Tally.clampQty(rawValue);
-  }
-}
-
 function onRowInput(event) {
   const field = event.target.dataset && event.target.dataset.field;
-  if (!field) return;
-  const row = event.target.closest("tr");
-  const person = row && findPerson(row.dataset.id);
-  if (!person) return;
-
   if (field === "name") {
+    const row = event.target.closest("tr");
+    const person = row && findPerson(row.dataset.id);
+    if (!person) return;
     person.name = String(event.target.value || "").slice(0, 80);
-    scheduleSave();
-    return;
-  }
-  if (field === "white-qty" || field === "blue-qty" || field === "xl3" || field === "xl4") {
-    setQtyField(person, field, event.target.value);
-    updatePriceCell(row, person);
-    renderTotals();
     scheduleSave();
   }
 }
 
 function onRowChange(event) {
-  const field = event.target.dataset && event.target.dataset.field;
-  if (!field) return;
-  const row = event.target.closest("tr");
+  const el = event.target;
+  const data = el.dataset || {};
+  const row = el.closest("tr");
   const person = row && findPerson(row.dataset.id);
   if (!person) return;
 
-  if (field === "name") {
-    const cleaned = Tally.cleanName(event.target.value);
+  if (data.cellInput) {
+    const [color, size] = data.cellInput.split("|");
+    person.items = Tally.setCellQty(person.items, color, size, el.value);
+    savePeople();
+    render();
+    const before = Tally.personShirts(person);
+    announce(`${person.name}: ${colorLabel(color)} ${size} set to ${Tally.cellQty(person.items, color, size)}. ${Tally.shirtsLabel(before)} for ${person.name}.`);
+    return;
+  }
+
+  if (data.field === "name") {
+    const cleaned = Tally.cleanName(el.value);
     if (Tally.isValidName(cleaned)) {
       person.name = cleaned;
-      event.target.value = cleaned;
+      el.value = cleaned;
     } else {
-      event.target.value = person.name;
+      el.value = person.name;
       showToast("A name is needed for every row.");
     }
     savePeople();
-    renderTotals();
-    return;
-  }
-
-  if (field === "white-size" || field === "blue-size") {
-    const color = field.startsWith("white") ? "white" : "blue";
-    const order = person[color];
-    order.size = Tally.priceFor(event.target.value) != null ? event.target.value : "";
-    if (!order.size) order.qty = 0;
-    else if (!order.qty) order.qty = 1;
-    syncColorInputs(row, person, color);
-    updatePriceCell(row, person);
-    renderTotals();
-    savePeople();
-    return;
-  }
-
-  if (field === "white-qty" || field === "blue-qty" || field === "xl3" || field === "xl4") {
-    setQtyField(person, field, event.target.value);
-    event.target.value = String(field.endsWith("-qty") ? splitColorField(person, field) : person[field]);
-    updatePriceCell(row, person);
-    renderTotals();
-    savePeople();
+    render();
   }
 }
 
@@ -777,62 +941,48 @@ function csvEscape(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+function sizeHeaders() {
+  return Tally.COLORS.flatMap((color) =>
+    Tally.SIZES.map((size) => `${colorLabel(color)} ${size}`));
+}
+
 function buildCsv() {
   const summary = Tally.summarize(people);
-  const rows = [
-    ["Name", "White size", "White qty", "Blue size", "Blue qty", "3XL", "4XL", "Price", "Status"],
-    ...people.map((person) => [
+  const header = ["#", "Name", ...sizeHeaders(), "Shirts", "Price", "Status"];
+
+  const rows = people.map((person, index) => {
+    const grid = Tally.personGrid(person);
+    return [
+      index + 1,
       person.name,
-      person.white.size,
-      person.white.qty,
-      person.blue.size,
-      person.blue.qty,
-      person.xl3,
-      person.xl4,
+      ...Tally.COLORS.flatMap((color) => Tally.SIZES.map((size) => grid[color][size])),
+      Tally.personShirts(person),
       Tally.personPrice(person),
       person.paid ? "Paid" : "Unpaid"
-    ])
-  ];
+    ];
+  });
+
   rows.push([]);
   rows.push(["SUMMARY"]);
   rows.push(["Color", ...Tally.SIZES, "Shirts", "Amount"]);
-  rows.push([
-    "White",
-    ...Tally.SIZES.map((size) => summary.grid.white[size]),
-    summary.colorCount.white,
-    summary.colorAmount.white
-  ]);
-  rows.push([
-    "Blue",
-    ...Tally.SIZES.map((size) => summary.grid.blue[size]),
-    summary.colorCount.blue,
-    summary.colorAmount.blue
-  ]);
-  rows.push([
-    "3XL/4XL extra",
-    ...Tally.SIZES.map((size) => summary.extras[size]),
-    summary.colorCount.extra,
-    summary.colorAmount.extra
-  ]);
-  rows.push([
-    "Total",
-    ...Tally.SIZES.map((size) => summary.sizeCount[size]),
-    summary.shirts,
-    summary.total
-  ]);
+  rows.push(["White", ...Tally.SIZES.map((size) => summary.grid.white[size]), summary.colorCount.white, summary.colorAmount.white]);
+  rows.push(["Blue", ...Tally.SIZES.map((size) => summary.grid.blue[size]), summary.colorCount.blue, summary.colorAmount.blue]);
+  rows.push(["Total", ...Tally.SIZES.map((size) => summary.sizeCount[size]), summary.shirts, summary.total]);
   rows.push([]);
   rows.push(["People", summary.count]);
   rows.push(["Shirts", summary.shirts]);
   rows.push(["Paid", summary.paid]);
   rows.push(["Unpaid", summary.unpaid]);
   rows.push(["Total", summary.total]);
-  return `\uFEFF${rows.map((row) => row.map(csvEscape).join(",")).join("\r\n")}`;
+
+  const all = [header, ...rows];
+  return `\uFEFF${all.map((row) => row.map(csvEscape).join(",")).join("\r\n")}`;
 }
 
 function downloadBackup() {
   const payload = {
     app: "TEAM ELITE PH TSHIRT",
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     people
   };
@@ -874,7 +1024,6 @@ function summaryText() {
     `${Tally.peopleLabel(summary.count)} · ${Tally.shirtsLabel(summary.shirts)}`,
     `White — ${line("white")}`,
     `Blue — ${line("blue")}`,
-    `3XL extra ${summary.extras["3XL"]} · 4XL extra ${summary.extras["4XL"]}`,
     `Total: ${Tally.formatPesos(summary.total)}`,
     `Paid: ${Tally.formatPesos(summary.paid)} (${summary.paidCount} people)`,
     `Unpaid: ${Tally.formatPesos(summary.unpaid)} (${summary.unpaidCount} people)`
@@ -887,7 +1036,7 @@ function unpaidText() {
   if (!unpaid.length) return "TEAM ELITE PH TSHIRT\nEveryone is paid.";
   return [
     "UNPAID — TEAM ELITE PH TSHIRT",
-    ...unpaid.map((person, index) => `${index + 1}. ${person.name} — ${describePerson(person)} — ${Tally.formatPesos(Tally.personPrice(person))}`),
+    ...unpaid.map((person, index) => `${index + 1}. ${person.name} — ${Tally.describePerson(person)} — ${Tally.formatPesos(Tally.personPrice(person))}`),
     `Unpaid total: ${Tally.formatPesos(summary.unpaid)}`
   ].join("\n");
 }
@@ -911,7 +1060,7 @@ function parseBackup(text) {
   const restored = [];
   let skipped = 0;
   arr.forEach((item) => {
-    const legacy = item && item.size != null && item.color != null && !item.white && !item.blue;
+    const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
     const person = legacy ? Tally.migrateLegacyOrder(item, uid) : Tally.normalizePerson(item, uid);
     if (person) restored.push(person);
     else skipped += 1;
@@ -926,6 +1075,7 @@ function parseBackup(text) {
 function applyRestore(restored, skipped) {
   const go = () => {
     people = restored;
+    editingId = null;
     savePeople();
     render();
     showToast(skipped
@@ -976,17 +1126,28 @@ function afterPrint() {
 
 function fillPrices() {
   document.getElementById("price-legend").textContent = Tally.priceLegend();
+  const tag = document.getElementById("build-tag");
+  if (tag) {
+    tag.textContent = `build ${BUILD} · ${new Date().toLocaleString("en-PH")}`;
+    document.body.dataset.build = BUILD;
+  }
 }
 
 /* ---------- wiring ---------- */
 
 function bind() {
-  addForm.addEventListener("submit", addPerson);
+  addForm.addEventListener("submit", addToCart);
   addForm.addEventListener("input", () => {
     delete addForm.dataset.confirmDup;
     setFormError("form-error", "");
     updateDupHint(Tally.cleanName(nameInput.value));
+    renderCart();
   });
+
+  document.getElementById("add-person-btn").addEventListener("click", addPersonToList);
+  document.getElementById("cart-clear").addEventListener("click", clearCart);
+  document.getElementById("cart-list").addEventListener("change", onCartChange);
+  document.getElementById("cart-list").addEventListener("click", onCartClick);
 
   tbody.addEventListener("input", onRowInput);
   tbody.addEventListener("change", onRowChange);
@@ -996,6 +1157,7 @@ function bind() {
     const id = button.closest("tr")?.dataset.id;
     if (!id) return;
     if (button.dataset.action === "toggle") togglePaid(id);
+    if (button.dataset.action === "edit") toggleEdit(id);
     if (button.dataset.action === "remove") removePerson(id);
   });
 
@@ -1046,6 +1208,7 @@ function bind() {
       onConfirm: () => {
         const snapshot = people.slice();
         people = [];
+        editingId = null;
         savePeople();
         render();
         showToast("List cleared.", "Undo", () => {
@@ -1085,7 +1248,14 @@ function bind() {
   document.addEventListener("keydown", (event) => {
     const modal = document.getElementById("confirm-modal");
     if (event.key === "Escape") {
-      if (!modal.hidden) closeConfirm();
+      if (!modal.hidden) {
+        closeConfirm();
+      } else if (editingId) {
+        const person = findPerson(editingId);
+        editingId = null;
+        render();
+        announce(`Finished editing ${person ? person.name : "the row"}.`);
+      }
       return;
     }
     if (!modal.hidden) trapTab(event, modal);
@@ -1111,9 +1281,13 @@ function init() {
     return;
   }
   fillPrices();
+  fillSizeOptions();
+  buildCols();
+  buildHead();
   people = loadPeople();
   bind();
   render();
+  renderCart();
   if (pendingNotice) showToast(pendingNotice);
   if (!window.matchMedia || !window.matchMedia("(max-width: 800px)").matches) {
     nameInput.focus();
