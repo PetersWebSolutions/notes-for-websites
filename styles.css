@@ -651,6 +651,47 @@ main { padding: 22px 0 8px; }
   gap: 6px;
 }
 
+.save-btn { position: relative; }
+
+/* A short confirmation next to Save list. */
+.save-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: var(--paid-bg);
+  color: var(--paid);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.save-chip::before {
+  content: "✓";
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* Shown only when a list that used to be here has gone missing. */
+.recover {
+  margin: 0 0 12px;
+  padding: 13px 15px;
+  border: 1.5px solid var(--danger);
+  border-left-width: 5px;
+  border-radius: 13px;
+  background: #fef4f3;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.recover strong { display: block; color: var(--danger); }
+
+.recover .ghost-btn { margin-top: 9px; }
+
 .search {
   flex: 1 1 180px;
   min-width: 0;

@@ -5,11 +5,14 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on the script tags in index.html.
  */
-const BUILD = "9f2c4a";
+const BUILD = "c31d7e";
 
 const Tally = window.Tally;
 const STORAGE_KEY = "team-elite-ph-tshirt-people-v2";
 const LEGACY_KEY = "team-elite-ph-tshirt-orders-v1";
+/* Marks that this device has held a real list, so an empty list afterwards is
+   a warning sign rather than simply a fresh start. */
+const USED_KEY = "team-elite-ph-tshirt-used-v1";
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -147,8 +150,10 @@ function savePeople() {
   const state = document.getElementById("save-state");
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(people));
+    /* Remember that this device has held a real list. */
+    if (people.length) localStorage.setItem(USED_KEY, "1");
     state.classList.remove("is-error");
-    state.textContent = `List saved on this website · ${stamp()}`;
+    state.textContent = `Saved on this device · ${stamp()}`;
     return true;
   } catch (error) {
     state.classList.add("is-error");
@@ -166,11 +171,34 @@ function saveNow() {
   window.clearTimeout(saveTimer);
   const ok = savePeople();
   if (ok) {
-    showToast("List saved on this website.");
+    flashSaved();
+    showToast("List saved on this device. It will be here when you come back.");
     announce(`List saved. ${Tally.peopleLabel(people.length)} on the list.`);
   } else {
     showToast("Could not save on this device. Export a backup before you leave.");
   }
+}
+
+/* A short "Saved" tick next to the button, so saving feels immediate. */
+let chipTimer = 0;
+function flashSaved() {
+  const chip = document.getElementById("save-chip");
+  if (!chip) return;
+  window.clearTimeout(chipTimer);
+  chip.hidden = false;
+  chipTimer = window.setTimeout(() => { chip.hidden = true; }, 2200);
+}
+
+/*
+ * This device held a list before but is showing an empty one, so the stored
+ * data was cleared or evicted. Say so instead of quietly starting over.
+ */
+function checkStorageLoss() {
+  let used = null;
+  try { used = localStorage.getItem(USED_KEY); } catch (error) { return; }
+  if (used !== "1" || people.length) return;
+  const note = document.getElementById("recover-note");
+  if (note) note.hidden = false;
 }
 
 function announce(message) {
@@ -1184,6 +1212,7 @@ function bind() {
   document.getElementById("print-btn").addEventListener("click", () => window.print());
   document.getElementById("backup-btn").addEventListener("click", downloadBackup);
   document.getElementById("restore-btn").addEventListener("click", () => document.getElementById("restore-file").click());
+  document.getElementById("recover-btn").addEventListener("click", () => document.getElementById("restore-file").click());
   document.getElementById("restore-file").addEventListener("change", async (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = "";
@@ -1264,6 +1293,23 @@ function bind() {
   window.addEventListener("beforeprint", beforePrint);
   window.addEventListener("afterprint", afterPrint);
 
+  /*
+   * Phones and browsers kill background tabs without warning, and a pending
+   * keystroke would be the only thing lost. Flush on the way out.
+   */
+  window.addEventListener("pagehide", () => {
+    if (saveTimer) {
+      window.clearTimeout(saveTimer);
+      savePeople();
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && saveTimer) {
+      window.clearTimeout(saveTimer);
+      savePeople();
+    }
+  });
+
   const viewport = window.visualViewport;
   if (viewport) {
     const syncKeyboard = () => {
@@ -1288,6 +1334,7 @@ function init() {
   bind();
   render();
   renderCart();
+  checkStorageLoss();
   if (pendingNotice) showToast(pendingNotice);
   if (!window.matchMedia || !window.matchMedia("(max-width: 800px)").matches) {
     nameInput.focus();

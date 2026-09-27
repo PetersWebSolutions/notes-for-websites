@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=9f2c4a">
+  <link rel="stylesheet" href="styles.css?v=c31d7e">
 </head>
 <body>
   <a class="skip" href="#orders">Skip to list</a>
@@ -144,8 +144,15 @@
         <p id="save-state" class="save-state">Tap Save list to store the list on this website.</p>
       </div>
 
+      <p class="recover" id="recover-note" hidden>
+        <strong>Your saved list is not here.</strong>
+        This tally keeps the list in <em>this browser on this device</em> only, so clearing browsing data, opening it in a private window, or switching device starts an empty list. If you still have a backup file, restore it below.
+        <button type="button" class="ghost-btn" id="recover-btn">Restore a backup</button>
+      </p>
+
       <div class="toolbar no-print">
-        <button type="button" class="tool-btn primary" id="save-btn">Save list</button>
+        <button type="button" class="tool-btn primary save-btn" id="save-btn">Save list</button>
+        <span class="save-chip" id="save-chip" hidden>Saved</span>
 
         <label class="search-label" for="search">Search</label>
         <input id="search" class="search" type="search" placeholder="Search name" autocomplete="off" enterkeyhint="search">
@@ -278,7 +285,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js?v=9f2c4a"></script>
-  <script src="app.js?v=9f2c4a"></script>
+  <script src="tally.js?v=c31d7e"></script>
+  <script src="app.js?v=c31d7e"></script>
 </body>
 </html>
