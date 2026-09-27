@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on the script tags in index.html.
  */
-const BUILD = "c31d7e";
+const BUILD = "d02a1f";
 
 const Tally = window.Tally;
 const STORAGE_KEY = "team-elite-ph-tshirt-people-v2";
@@ -28,6 +28,8 @@ const tbody = document.getElementById("order-body");
 let cart = [];
 /* The one row whose quantities can be changed right now, or null. */
 let editingId = null;
+/* On phones each person starts as one row; these ids have the size grid open. */
+const expandedIds = new Set();
 
 let people = [];
 let filter = "all";
@@ -526,11 +528,21 @@ function renderRow(person) {
   const grid = Tally.personGrid(person);
   const row = h("tr", {
     "data-id": person.id,
-    class: `${person.paid ? "is-paid" : "is-unpaid"}${editing ? " is-editing" : ""}${person.id === highlightId ? " is-new" : ""}`
+    class: `${person.paid ? "is-paid" : "is-unpaid"}${editing ? " is-editing" : ""}${expandedIds.has(person.id) ? " is-open" : ""}${person.id === highlightId ? " is-new" : ""}`
   });
 
   const nameCell = h("th", { scope: "row", class: "col-name", "data-label": "NAME" });
+  /* Phone only (hidden on the desktop sheet): taps open the size grid for this person. */
+  const expandBtn = h("button", {
+    type: "button",
+    class: "expand-btn no-print",
+    "data-action": "expand",
+    "aria-expanded": expandedIds.has(person.id) ? "true" : "false",
+    "aria-label": `Show the size grid for ${person.name}`,
+    text: "▸"
+  });
   const nameWrap = h("div", { class: "name-wrap" },
+    expandBtn,
     h("span", { class: "num", text: String(entryNumber(person)).padStart(3, "0") })
   );
   if (editing) {
@@ -593,6 +605,24 @@ function renderRow(person) {
     actions
   );
   return row;
+}
+
+/*
+ * Phone layout only: each person shows as one row until the caret opens the
+ * fourteen size cells. The class flips in place so taps stay snappy.
+ */
+function toggleExpand(id) {
+  const open = !expandedIds.has(id);
+  if (open) expandedIds.add(id); else expandedIds.delete(id);
+  const row = tbody.querySelector(`tr[data-id="${id}"]`);
+  if (!row) return;
+  row.classList.toggle("is-open", open);
+  const button = row.querySelector(".expand-btn");
+  if (button) {
+    const person = findPerson(id);
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.setAttribute("aria-label", `${open ? "Hide" : "Show"} the size grid for ${person ? person.name : "this person"}`);
+  }
 }
 
 /* Keep the caret where it was when a row redraws after an edit. */
@@ -828,6 +858,8 @@ function toggleEdit(id) {
     return;
   }
   editingId = id;
+  /* The size cells must be visible to edit them, so the row opens on phones. */
+  expandedIds.add(id);
   render();
   const person = findPerson(id);
   if (person) {
@@ -842,6 +874,7 @@ function removePerson(id) {
   if (index < 0) return;
   const [removed] = people.splice(index, 1);
   if (editingId === id) editingId = null;
+  expandedIds.delete(id);
   savePeople();
   render();
   announce(`Removed ${removed.name}.`);
@@ -1187,6 +1220,7 @@ function bind() {
     if (button.dataset.action === "toggle") togglePaid(id);
     if (button.dataset.action === "edit") toggleEdit(id);
     if (button.dataset.action === "remove") removePerson(id);
+    if (button.dataset.action === "expand") toggleExpand(id);
   });
 
   searchInput.addEventListener("input", () => {
