@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "f161ae";
+const BUILD = "f7bce4";
 
 const Tally = window.Tally;
 const DOC = window.Store ? Store.doc(Store.currentDocId()) : null;
@@ -109,7 +109,13 @@ function loadPeople() {
     const restored = [];
     let skipped = 0;
     arr.forEach((item) => {
-      const person = Tally.normalizePerson(item, uid);
+      // The oldest backups stored one shirt per row ({ name, size, color,
+      // paid }). Migrate them like restore does, or their shirts would be
+      // dropped when the file opens.
+      const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
+      const person = legacy
+        ? Tally.migrateLegacyOrder(item, uid)
+        : Tally.normalizePerson(item, uid);
       if (person) restored.push(person);
       else skipped += 1;
     });
@@ -145,6 +151,19 @@ function scheduleSave() {
   saveTimer = window.setTimeout(savePeople, 400);
 }
 
+/*
+ * Write any debounced save immediately. Runs on pagehide and
+ * visibilitychange, and on sign-out (via window.flushPendingSaves) before
+ * the session is dropped, so a pending keystroke can never be lost.
+ */
+function flushPendingSave() {
+  if (!saveTimer) return;
+  window.clearTimeout(saveTimer);
+  saveTimer = 0;
+  savePeople();
+}
+window.flushPendingSaves = flushPendingSave;
+
 function saveNow() {
   window.clearTimeout(saveTimer);
   const ok = savePeople();
@@ -165,6 +184,47 @@ function flashSaved() {
   window.clearTimeout(chipTimer);
   chip.hidden = false;
   chipTimer = window.setTimeout(() => { chip.hidden = true; }, 2200);
+}
+
+/*
+ * The explicit UPDATE LIST button at the bottom of the page. It force-writes
+ * the people array to the open file right now and confirms it three ways:
+ * the button flips to "Saved ✓", the line below gains a timestamp, and the
+ * toast appears. With no file open it writes nothing and points to Files.
+ */
+let updateTimer = 0;
+function updateList() {
+  const button = document.getElementById("update-list-btn");
+  const when = document.getElementById("update-when");
+  if (!DOC || !Store.doc(DOC.id)) {
+    when.classList.add("is-error");
+    when.textContent = "No file is open here. Go to the Files page and open a file before saving.";
+    showToast("No file is open here. Go to the Files page and open a file to save the list.", "Go to Files", () => {
+      window.location.assign("lists.html");
+    });
+    announce("No file is open. Open a file on the Files page to save the list.");
+    return;
+  }
+  window.clearTimeout(saveTimer);
+  saveTimer = 0;
+  if (!savePeople()) {
+    when.classList.add("is-error");
+    when.textContent = "Could not save on this device. Export a backup before you leave.";
+    showToast("Could not save on this device. Export a backup before you leave.");
+    return;
+  }
+  flashSaved();
+  when.classList.remove("is-error");
+  when.textContent = `Last saved ${stamp()}`;
+  window.clearTimeout(updateTimer);
+  button.textContent = "Saved ✓";
+  button.classList.add("is-saved");
+  updateTimer = window.setTimeout(() => {
+    button.textContent = "UPDATE LIST";
+    button.classList.remove("is-saved");
+  }, 2200);
+  showToast("List saved on this device. It will be here when you come back.");
+  announce(`List saved in ${DOC.name}. ${Tally.peopleLabel(people.length)} on the list.`);
 }
 
 /*
@@ -1248,6 +1308,7 @@ function bind() {
   document.getElementById("clear-filters").addEventListener("click", clearFilters);
 
   document.getElementById("save-btn").addEventListener("click", saveNow);
+  document.getElementById("update-list-btn").addEventListener("click", updateList);
   document.getElementById("export-csv").addEventListener("click", exportCsv);
   document.getElementById("print-btn").addEventListener("click", () => window.print());
   document.getElementById("backup-btn").addEventListener("click", downloadBackup);
@@ -1337,17 +1398,9 @@ function bind() {
    * Phones and browsers kill background tabs without warning, and a pending
    * keystroke would be the only thing lost. Flush on the way out.
    */
-  window.addEventListener("pagehide", () => {
-    if (saveTimer) {
-      window.clearTimeout(saveTimer);
-      savePeople();
-    }
-  });
+  window.addEventListener("pagehide", flushPendingSave);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && saveTimer) {
-      window.clearTimeout(saveTimer);
-      savePeople();
-    }
+    if (document.visibilityState === "hidden") flushPendingSave();
   });
 
   const viewport = window.visualViewport;

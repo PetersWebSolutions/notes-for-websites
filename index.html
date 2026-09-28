@@ -17,8 +17,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=f161ae">
-  <script src="store.js?v=f161ae"></script>
+  <link rel="stylesheet" href="styles.css?v=f7bce4">
+  <script src="store.js?v=f7bce4"></script>
   <script>
     /* Sign in and pick a file before the page draws anything. */
     (function () {
@@ -277,6 +277,12 @@
         <p class="helper totals-foot" id="updated-at"></p>
       </div>
 
+      <!-- explicit save below the tally, so nobody has to trust the invisible auto-save -->
+      <div class="update-list no-print">
+        <button type="button" class="add-btn update-btn" id="update-list-btn">UPDATE LIST</button>
+        <p class="update-when" id="update-when">Every change is also saved automatically as you go.</p>
+      </div>
+
       <div class="summary-actions no-print">
         <button type="button" class="tool-btn" id="copy-summary">Copy summary</button>
         <button type="button" class="tool-btn" id="copy-unpaid">Copy unpaid</button>
@@ -305,7 +311,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js?v=f161ae"></script>
-  <script src="app.js?v=f161ae"></script>
+  <script src="tally.js?v=f7bce4"></script>
+  <script src="app.js?v=f7bce4"></script>
 </body>
 </html>
