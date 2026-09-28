@@ -173,6 +173,8 @@ npm run test:e2e
 
 The browser suite exercises sign-in → files → tally at 390px and 1440px, actual navigation guards, phone caret expansion, desktop header/body alignment, edit locking, refresh, reopening with a saved profile, file isolation, and sign-out. `PREVIEW_URL` can target another served URL; `CHROMIUM_PATH` can select an installed Chromium. Screenshots/results are ignored by Git. Optional remote fonts are stubbed in browser tests; application assets load normally.
 
+The suite also stubs `supabase-config.js` with an empty connection, so it drives the device-local flow whatever the repo happens to ship. Without that stub the suite fails on its first assertion as soon as a real project URL is committed: `index.html` then opens straight to the shared list and never redirects to `login.html`.
+
 ## Publishing
 
 Vercel is connected through the Git integration: a push to `main` deploys

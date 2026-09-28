@@ -9,6 +9,11 @@ for (const width of [390, 1440]) {
     // Only the optional external fonts are stubbed; all app files load over HTTP.
     await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({body:'',contentType:'text/css'}));
     await context.route('https://fonts.gstatic.com/**',route=>route.abort());
+    // This suite drives the device-local flow — sign in, pick a file, tally —
+    // which index.html only enters when no Supabase connection is configured.
+    // The repo may well ship a live one, so stub the connection file instead of
+    // depending on what happens to be committed in supabase-config.js.
+    await context.route(/supabase-config\.js/,route=>route.fulfill({body:'window.SUPABASE_CONFIG = { url: "", anonKey: "", listId: "main" };',contentType:'application/javascript'}));
     await page.goto('index.html');
     await expect(page).toHaveURL(/login\.html$/);
     await page.screenshot({path:testInfo.outputPath('01-login.png'),fullPage:true});
