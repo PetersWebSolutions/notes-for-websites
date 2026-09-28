@@ -1435,9 +1435,112 @@ body.modal-open { overflow: hidden; }
   .tap-hint { font-size: 11.5px; }
 }
 
+/* ---------- sign-in, files and open-file context ---------- */
+.gate { padding-bottom: 0; }
+.gate-wrap { width: min(480px, calc(100% - 32px)); margin: 7vh auto 40px; }
+.gate-card, .files-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel, #fff);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.gate-brand, .files-brand { display: flex; align-items: center; gap: 16px; }
+.gate-brand { background: var(--navy); color: #fff; padding: 28px; border-bottom: 4px solid var(--gold-2); }
+.gate-brand .crest, .files-brand .crest { flex-shrink: 0; }
+.gate-brand h1, .files-brand h1 { margin: 0; font: 700 30px/1.05 var(--display); }
+.gate-brand h1 span, .files-brand h1 span { display: block; color: var(--gold-2); }
+.gate-brand .eyebrow, .files-brand .eyebrow { margin: 0 0 5px; }
+.gate-form { display: grid; gap: 16px; }
+.gate-card > .gate-form { padding: 28px; }
+.gate-form h2 { margin: 0; font: 700 30px/1.1 var(--display); color: var(--navy); }
+.gate-form .field-block { margin: 0; }
+.gate-form input, #file-name {
+  width: 100%; min-width: 0; padding: 12px 14px;
+  border: 1.5px solid var(--line); border-radius: 10px;
+  background: #fff; font-size: 16px;
+}
+.gate-form input:focus, #file-name:focus { border-color: var(--blue-deep); }
+.gate-btn { width: 100%; margin-top: 4px; }
+.gate-extra, .files-extra { border-top: 1px solid var(--line); padding: 20px 28px; }
+.gate-extra summary, .files-extra summary { cursor: pointer; color: var(--blue-deep); font-weight: 700; font-size: 14px; }
+.gate-extra .gate-form, .files-extra .gate-form { margin-top: 18px; }
+.gate-extra .helper { margin-top: 12px; }
+.gate-note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.gate-card > .gate-note { margin: 0; padding: 0 28px 24px; }
+.files-wrap { width: min(960px, calc(100% - 32px)); margin: 32px auto; }
+.files-top { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 24px; background: var(--navy); border-radius: var(--radius); margin-bottom: 24px; color: #fff; }
+.files-brand h1 { font-size: 28px; }
+.files-user { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px; font-size: 13px; }
+.files-user .ghost-btn { background: transparent; color: #fff; border-color: #61738b; }
+.files-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; padding: 24px 28px 16px; }
+.files-head h2 { margin: 0; color: var(--navy); font: 700 34px/1.1 var(--display); }
+.files-head p { margin: 0; }
+#new-file { display: flex; gap: 10px; padding: 0 28px; }
+#new-file-btn { flex-shrink: 0; }
+#file-error { margin: 14px 28px; }
+.files-empty { text-align: center; padding: 44px 24px; color: var(--muted); }
+.files-empty h3 { margin: 0 0 8px; font: 700 28px var(--display); color: var(--navy); }
+.files-empty p { margin: 0; font-size: 14px; }
+.file-list { list-style: none; padding: 8px 28px 0; margin: 0; }
+.file-item { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 24px 0; border-bottom: 1px solid var(--line); }
+.file-item:last-child { border: 0; }
+.file-info { min-width: 0; }
+.file-name { margin: 0 0 6px; color: var(--navy); font: 700 26px/1.15 var(--display); overflow-wrap: anywhere; }
+.file-meta { margin: 0 0 7px; font-size: 13px; color: var(--muted); }
+.file-time { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
+.file-time strong { font-weight: 600; }
+.file-rel { white-space: nowrap; }
+.file-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; }
+.file-open { text-decoration: none; font-size: 14px; padding: 10px 18px; }
+.file-actions .ghost-btn { padding: 9px 12px; }
+.file-actions .danger { color: var(--danger); }
+.files-extra { margin-top: 16px; }
+.files-extra .gate-form { max-width: 400px; }
+#people-here { margin-top: 16px; overflow-wrap: anywhere; }
+.file-bar { background: #fff; border-bottom: 1px solid var(--line); }
+.file-bar-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding-top: 10px; padding-bottom: 10px; }
+.back-link { flex-shrink: 0; color: var(--blue-deep); font-weight: 800; text-decoration: none; font-size: 13px; }
+.back-link:hover { text-decoration: underline; }
+.file-now { margin: 0; font-size: 13px; color: var(--navy); overflow-wrap: anywhere; min-width: 0; }
+.file-when { margin: 0 0 0 auto; font-size: 11px; color: var(--muted); }
+
+/* A hidden extra cell preserves the original 18 visible desktop columns. */
+#order-cols .col-summary { display: none; width: 0; }
+#order-table tbody .col-summary { display: none; }
+#order-table tfoot .col-summary { display: none; }
+.order-qty input { max-width: 120px; }
+.sum-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+.sum-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 3px 7px; font-size: 11px; }
+.sum-chip.is-blue { background: #edf3ff; border-color: #b5c9f6; color: var(--blue-deep); }
+.sum-color { font-size: 10px; }
+.sum-size, .sum-qty { font-weight: 800; }
+.sum-empty { color: var(--muted); font-size: 12px; }
+
 /* Compact phone layout: one row per person; a caret opens the size grid. */
 @media (max-width: 720px) {
+  .gate-wrap { margin-top: 24px; }
+  .gate-brand, .gate-card > .gate-form, .gate-extra { padding: 22px; }
+  .files-wrap { margin-top: 16px; }
+  .files-top { flex-direction: column; align-items: flex-start; padding: 20px; gap: 20px; }
+  .files-user { justify-content: flex-start; }
+  .files-head { padding: 22px 20px 16px; }
+  #new-file { padding: 0 20px; flex-wrap: wrap; }
+  #file-name { flex: 1 1 230px; }
+  #file-error { margin-left: 20px; margin-right: 20px; }
+  .file-list { padding: 8px 20px 0; }
+  .file-item { flex-direction: column; align-items: stretch; gap: 14px; }
+  .file-actions { flex-shrink: 1; }
+  .files-extra { padding: 20px; }
+  .file-when { flex-basis: 100%; margin-left: 0; }
   .table-scroll { overflow: visible; }
+
+  /* Main's caret layout wins over the spec's swipe-row layout. Chips and
+     size cells appear only when expanded; the collapsed row stays compact. */
+  #order-table tbody tr.is-open .col-summary,
+  #order-table tbody tr.is-editing .col-summary {
+    display: block; order: 4; flex: 1 1 100%; padding: 5px 0; border: 0;
+  }
 
   /* The card layout is not a table any more, so the grid floor must go. */
   #order-table { min-width: 0; }
@@ -1504,8 +1607,8 @@ body.modal-open { overflow: hidden; }
   /* Fourteen size cells wrap into two lines of seven. */
   #order-table tbody .cell-qty {
     order: 4;
-    flex: 0 1 14.28%;
-    max-width: 14.28%;
+    flex: 0 0 calc((100% - 48px) / 7);
+    max-width: calc((100% - 48px) / 7);
     padding: 4px 1px;
     border: 0;
     border-radius: 8px;

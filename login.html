@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1f3a">
+  <meta name="description" content="Browser-local sign-in and saved files for TEAM ELITE PH TSHIRT.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Elite PH Shirts">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Sign in · TEAM ELITE PH TSHIRT</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=f161ae">
+</head>
+<body class="gate">
+  <main class="gate-wrap">
+    <div class="gate-card">
+      <div class="gate-brand"><div class="crest" aria-hidden="true"><span>TE</span></div>
+        <div><p class="eyebrow">Sales tally</p><h1>TEAM ELITE PH <span>TSHIRT</span></h1></div></div>
+      <form id="login-form" class="gate-form" novalidate>
+        <h2>Sign in</h2>
+        <div class="field-block">
+          <label class="field" for="login-name">NAME</label>
+          <input id="login-name" name="username" type="text" maxlength="40" autocomplete="username" required>
+        </div>
+        <div class="field-block">
+          <label class="field" for="login-pass">PASSCODE</label>
+          <input id="login-pass" name="password" type="password" maxlength="60" autocomplete="current-password" required>
+        </div>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button id="login-btn" class="add-btn gate-btn" type="submit">SIGN IN</button>
+      </form>
+      <details class="gate-extra">
+        <summary>First time on this device?</summary>
+        <p class="helper">Add your name and choose a passcode for this browser.</p>
+        <form id="signup-form" class="gate-form" novalidate>
+          <div class="field-block">
+            <label class="field" for="new-name">YOUR NAME</label>
+            <input id="new-name" name="username" type="text" maxlength="40" autocomplete="username" required>
+          </div>
+          <div class="field-block">
+            <label class="field" for="new-pass">CHOOSE A PASSCODE</label>
+            <input id="new-pass" name="password" type="password" maxlength="60" autocomplete="new-password" required>
+          </div>
+          <p id="signup-error" class="form-error" role="alert" hidden></p>
+          <button id="signup-btn" class="ghost-btn" type="submit">Add me to this device</button>
+        </form>
+      </details>
+      <p class="gate-note">Your sign-in and saved files stay in this browser on this device. They are not shared with other devices. This is a lock screen, not security.</p>
+    </div>
+  </main>
+  <div id="toast" class="toast" hidden role="status"></div>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+  <script src="store.js?v=f161ae"></script>
+  <script src="login.js?v=f161ae"></script>
+</body>
+</html>

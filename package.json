@@ -1,0 +1,15 @@
+{
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "jsdom": "^30.1.1"
+  },
+  "name": "team-elite-ph-tshirt",
+  "private": true,
+  "description": "Static browser-local tally; dependencies below are test-only.",
+  "scripts": {
+    "test": "node tally.test.js && node --test store.test.js pages.test.js static.test.js",
+    "test:e2e": "playwright test",
+    "stamp": "node tools/build-stamp.cjs",
+    "stamp:check": "node tools/build-stamp.cjs --check"
+  }
+}

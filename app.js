@@ -1,18 +1,14 @@
 "use strict";
 
 /*
- * Bump this whenever app.js changes. It is printed at the bottom of the list
+ * Bump this whenever shipped files change. It is printed at the bottom of the list
  * so a screenshot always says which build is actually running, and it matches
- * the ?v= token on the script tags in index.html.
+ * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "d02a1f";
+const BUILD = "f161ae";
 
 const Tally = window.Tally;
-const STORAGE_KEY = "team-elite-ph-tshirt-people-v2";
-const LEGACY_KEY = "team-elite-ph-tshirt-orders-v1";
-/* Marks that this device has held a real list, so an empty list afterwards is
-   a warning sign rather than simply a fresh start. */
-const USED_KEY = "team-elite-ph-tshirt-used-v1";
+const DOC = window.Store ? Store.doc(Store.currentDocId()) : null;
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -107,41 +103,18 @@ function hasColor(person, color) {
 /* ---------- storage ---------- */
 
 function loadPeople() {
+  if (!DOC) return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      const arr = Array.isArray(data) ? data : [];
-      const restored = [];
-      let skipped = 0;
-      arr.forEach((item) => {
-        const person = Tally.normalizePerson(item, uid);
-        if (person) restored.push(person);
-        else skipped += 1;
-      });
-      if (skipped) pendingNotice = "Some saved rows were skipped because they were incomplete.";
-      if (restored.length) {
-        pendingNotice = pendingNotice
-          || "Your saved list now uses one row per person with every shirt in the size grid.";
-      }
-      return restored.slice(0, Tally.MAX_PEOPLE);
-    }
-
-    const legacyRaw = localStorage.getItem(LEGACY_KEY);
-    if (legacyRaw) {
-      const data = JSON.parse(legacyRaw);
-      const arr = Array.isArray(data) ? data : [];
-      const restored = [];
-      arr.forEach((item) => {
-        const person = Tally.migrateLegacyOrder(item, uid);
-        if (person) restored.push(person);
-      });
-      if (restored.length) {
-        pendingNotice = "Your older shirt list was moved to the new one-person-per-row layout.";
-        return restored.slice(0, Tally.MAX_PEOPLE);
-      }
-    }
-    return [];
+    const arr = Array.isArray(DOC.people) ? DOC.people : [];
+    const restored = [];
+    let skipped = 0;
+    arr.forEach((item) => {
+      const person = Tally.normalizePerson(item, uid);
+      if (person) restored.push(person);
+      else skipped += 1;
+    });
+    if (skipped) pendingNotice = "Some saved rows were skipped because they were incomplete.";
+    return restored.slice(0, Tally.MAX_PEOPLE);
   } catch (error) {
     pendingNotice = "Could not read the saved list. Starting fresh on this device.";
     return [];
@@ -149,13 +122,16 @@ function loadPeople() {
 }
 
 function savePeople() {
+  if (!DOC) return false;
   const state = document.getElementById("save-state");
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(people));
-    /* Remember that this device has held a real list. */
-    if (people.length) localStorage.setItem(USED_KEY, "1");
+    if (!Store.updateDoc(DOC.id, people)) throw new Error("no such file");
+    if (people.length) Store.touchDevice();
+    const saved = Store.doc(DOC.id);
+    if (saved) Object.assign(DOC, saved);
+    showOpenFile();
     state.classList.remove("is-error");
-    state.textContent = `Saved on this device · ${stamp()}`;
+    state.textContent = `Saved in ${DOC.name} · ${stamp()}`;
     return true;
   } catch (error) {
     state.classList.add("is-error");
@@ -196,9 +172,7 @@ function flashSaved() {
  * data was cleared or evicted. Say so instead of quietly starting over.
  */
 function checkStorageLoss() {
-  let used = null;
-  try { used = localStorage.getItem(USED_KEY); } catch (error) { return; }
-  if (used !== "1" || people.length) return;
+  if (!Store.deviceHasHeldAList() || people.length) return;
   const note = document.getElementById("recover-note");
   if (note) note.hidden = false;
 }
@@ -462,6 +436,7 @@ function buildCols() {
   const sizeCols = () => Tally.SIZES.map(() => col("col-size"));
   document.getElementById("order-cols").replaceChildren(
     col("col-name"),
+    col("col-summary"),
     ...sizeCols(),
     ...sizeCols(),
     col("col-price"),
@@ -523,6 +498,22 @@ function qtyCell(person, color, size, value, editing) {
   return cell;
 }
 
+/* Extra phone detail only: main's caret still controls the expanded grid. */
+function summaryCell(grid) {
+  const wrap = h("div", { class: "sum-wrap" });
+  Tally.COLORS.forEach((color) => {
+    Tally.SIZES.forEach((size) => {
+      const qty = grid[color][size];
+      if (qty) wrap.append(h("span", { class: `sum-chip is-${color}` },
+        h("span", { class: "sum-color", text: colorLabel(color) }),
+        h("span", { class: "sum-size", text: size }),
+        h("span", { class: "sum-qty", text: "\u00d7" + qty })));
+    });
+  });
+  if (!wrap.childNodes.length) wrap.append(h("span", { class: "sum-empty", text: "no shirts yet" }));
+  return h("td", { class: "col-summary", "data-label": "SIZES" }, wrap);
+}
+
 function renderRow(person) {
   const editing = editingId === person.id;
   const grid = Tally.personGrid(person);
@@ -563,6 +554,7 @@ function renderRow(person) {
   nameCell.append(nameWrap);
   /* The name is the first column, so it has to be in the row before the grid. */
   row.append(nameCell);
+  row.append(summaryCell(grid));
 
   Tally.COLORS.forEach((color) => {
     Tally.SIZES.forEach((size) => row.append(qtyCell(person, color, size, grid[color][size], editing)));
@@ -692,6 +684,7 @@ function renderFoot(shown, full) {
 
   foot.replaceChildren(h("tr", {},
     name,
+    h("td", { class: "col-summary", "data-label": "SIZES" }),
     ...cells,
     h("td", { class: "col-price", "data-label": "PRICE" }, h("span", { class: "total-figure", text: Tally.formatPesos(summary.total) })),
     status,
@@ -824,7 +817,18 @@ function renderTotals() {
   renderTotalBar(summary);
 }
 
+function showOpenFile() {
+  if (!DOC) return;
+  const name = document.getElementById("open-file-name");
+  const when = document.getElementById("open-file-when");
+  const title = document.getElementById("step3-title");
+  if (name) name.textContent = DOC.name;
+  if (when) when.textContent = `Last modified ${Store.formatDate(DOC.updatedAt)}`;
+  if (title) title.textContent = DOC.name;
+}
+
 function render(options = {}) {
+  showOpenFile();
   const keepScroll = options.keepScroll !== false;
   const scrollY = window.scrollY;
   renderTable();
@@ -1041,14 +1045,16 @@ function buildCsv() {
 }
 
 function downloadBackup() {
+  const safe = (DOC ? DOC.name : "list").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const payload = {
     app: "TEAM ELITE PH TSHIRT",
     version: 3,
     exportedAt: new Date().toISOString(),
+    file: DOC ? DOC.name : "",
     people
   };
   download(
-    `team-elite-ph-tshirt-backup-${fileDate()}.json`,
+    `team-elite-${safe}-${fileDate()}.json`,
     JSON.stringify(payload, null, 2),
     "application/json"
   );
