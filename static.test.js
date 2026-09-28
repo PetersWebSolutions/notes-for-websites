@@ -34,7 +34,7 @@ test('all three pages have metadata, font preconnects, shared assets and live re
     assert.ok(d.querySelector('link[href="favicon.svg"]'));
     assert.ok(d.querySelector('#toast'));assert.equal(d.querySelector('#live').getAttribute('aria-live'),'polite');
     const srcs=[...d.querySelectorAll('script[src]')].map(s=>s.getAttribute('src').split('?')[0]);
-    assert.deepEqual(srcs,html==='index.html'?['store.js','tally.js','app.js']:['store.js',html.replace('.html','.js')]);
+    assert.deepEqual(srcs,html==='index.html'?['store.js','supabase-config.js','shared-store.js','tally.js','app.js']:['store.js',html.replace('.html','.js')]);
     dom.window.close();
   }
 });

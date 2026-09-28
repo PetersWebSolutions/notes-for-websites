@@ -23,6 +23,16 @@ test('inline guard: missing Store, missing session, missing/unknown doc, and val
   guard(window, fake);
   assert.deepEqual(seen, []);
 });
+test('inline guard: shared mode is open to everyone, with or without a session', () => {
+  const source = read('index.html').match(/\(function \(\) \{[\s\S]*?\}\)\(\);/)[0];
+  const guard = new Function('window', 'Store', source);
+  const seen=[];
+  const window={location:{replace:u=>seen.push(u)},SharedStore:{enabled:()=>true}};
+  guard(window, undefined);
+  assert.deepEqual(seen, []);
+  guard({...window,SharedStore:{enabled:()=>false}}, {session:()=>null});
+  assert.deepEqual(seen, ['login.html']);
+});
 test('login focus, wrong passcode, input clears error, and successful persistent session', t => {
   const b=page(t, 'login.html');
   assert.equal(b.w.document.activeElement.id, 'login-name');
@@ -248,4 +258,81 @@ test('open-file load normalizes old shapes, skips invalid rows and caps at 300',
   assert.equal(b.qa('#order-body tr').length,300);
   assert.equal(b.q('.name-text').textContent,'Older person');
   assert.match(b.q('#toast').textContent,/Some saved rows were skipped/);
+});
+test('oldest one-shirt-per-row backups keep their shirts when the file opens', t => {
+  const order={id:'o1',name:'Oldest Row',size:'3XL',color:'blue',paid:true,createdAt:5};
+  const b=tally(t,[{...documentA,people:[order]}]);
+  assert.equal(b.q('.name-text').textContent,'Oldest Row');
+  assert.equal(b.q('#sum-shirts').textContent,'1');
+  assert.equal(b.q('#sum-paid').textContent,'₱449');
+  assert.equal(b.q('#order-body .sz-blue[data-label="3XL"] .qty-figure').textContent,'1');
+});
+test('UPDATE LIST force-writes the in-memory people and confirms, then reverts', async t => {
+  const b=tally(t);
+  const before=JSON.stringify(b.S.doc('b'));
+  b.q('[data-action="edit"]').click();
+  input(b,'[data-field="name"]','  Ana   Updated ');
+  // The 400ms auto-save is still pending; UPDATE LIST must write right now.
+  b.q('#update-list-btn').click();
+  assert.equal(b.S.doc('a').people[0].name,'  Ana   Updated ');
+  assert.equal(JSON.stringify(b.S.doc('b')),before);
+  assert.equal(b.q('#update-list-btn').textContent,'Saved ✓');
+  assert.equal(b.q('#update-list-btn').classList.contains('is-saved'),true);
+  assert.match(b.q('#update-when').textContent,/^Last saved /);
+  assert.equal(b.q('#toast').hidden,false);
+  assert.match(b.q('#toast').textContent,/saved on this device/i);
+  assert.match(b.q('#save-state').textContent,/Saved in Joyce listing/);
+  await new Promise(r=>setTimeout(r,2300));
+  assert.equal(b.q('#update-list-btn').textContent,'UPDATE LIST');
+  assert.equal(b.q('#update-list-btn').classList.contains('is-saved'),false);
+});
+test('UPDATE LIST without an open file writes nothing and points to the Files page', t => {
+  const b=page(t,'index.html',profile([]),'https://example.test/index.html?doc=a');
+  const before=snapshot(b.w);
+  b.q('#update-list-btn').click();
+  assert.equal(b.q('#update-list-btn').textContent,'UPDATE LIST');
+  assert.equal(b.q('#update-when').classList.contains('is-error'),true);
+  assert.match(b.q('#update-when').textContent,/Files page/);
+  assert.equal(b.q('#toast').hidden,false);
+  assert.match(b.q('#toast').textContent,/Files page/);
+  assert.deepEqual(snapshot(b.w),before);
+  // Adding a person with no open file must not write either.
+  input(b,'#name-input','Ghost'); input(b,'#size-input','M','change'); input(b,'#qty-input','1');
+  submit(b,'#add-form');
+  b.q('#add-person-btn').click();
+  assert.deepEqual(snapshot(b.w),before);
+});
+test('sign-out keeps every file; signing back in shows the same files and people', t => {
+  const b=page(t,'lists.html',profile());
+  b.q('#signout-btn').click();
+  assert.equal(b.S.session(),null);
+  assert.equal(b.S.docs().length,2);
+  const c=page(t,'login.html',snapshot(b.w));
+  input(c,'#login-name','Joyce'); input(c,'#login-pass',pass); submit(c,'#login-form');
+  assert.equal(c.S.session().name,'Joyce');
+  const d=page(t,'lists.html',snapshot(c.w));
+  assert.equal(d.qa('.file-item').length,2);
+  assert.match(d.qa('.file-meta')[0].textContent,/2 people · 7 shirts/);
+  const e=page(t,'index.html',snapshot(d.w),'https://example.test/index.html?doc=a');
+  assert.deepEqual(e.qa('.name-text').map(n=>n.textContent),['Ana Reyes','Ben Cruz']);
+});
+test('refresh preserves data: visibilitychange, pagehide and sign-out flush a pending save', t => {
+  const b=tally(t);
+  b.q('[data-action="edit"]').click();
+  input(b,'[data-field="name"]','Pending Name');
+  // The 400ms debounce has not fired; hiding the tab must flush it.
+  Object.defineProperty(b.w.document,'visibilityState',{configurable:true,value:'hidden'});
+  b.w.document.dispatchEvent(new b.w.Event('visibilitychange'));
+  assert.equal(b.S.doc('a').people[0].name,'Pending Name');
+  input(b,'[data-field="name"]','Pending Again');
+  b.w.dispatchEvent(new b.w.Event('pagehide'));
+  assert.equal(b.S.doc('a').people[0].name,'Pending Again');
+  input(b,'[data-field="name"]','Signed Out Edit');
+  // The same hook the sign-out button calls before dropping the session.
+  assert.equal(typeof b.w.flushPendingSaves,'function');
+  b.w.flushPendingSaves();
+  assert.equal(b.S.doc('a').people[0].name,'Signed Out Edit');
+  const c=page(t,'index.html',snapshot(b.w),'https://example.test/index.html?doc=a');
+  assert.equal(c.q('.name-text').textContent,'Signed Out Edit');
+  assert.equal(c.S.session().name,'Joyce');
 });

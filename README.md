@@ -101,6 +101,53 @@ The list is stored as one person per row, where each person holds a list of item
 
 The existing single list (`team-elite-ph-tshirt-people-v2`) becomes **Main list** on the first visit to Saved files. Its original storage key is left untouched as a fallback, even after edits or deletion of the migrated file. Older person shapes are normalized when that file is opened: the old white size, blue size, and extra 3XL/4XL columns become items. The old extra columns carried no color, so they are read as **white**. Anything saved from here on uses the shape above, and a **Backup** from an earlier version still restores.
 
+## Shared list (Supabase)
+
+By default the tally is device-local, as described above. To make **one list
+that everyone who opens the site sees and edits**, connect a free Supabase
+project:
+
+1. Create a project at <https://supabase.com>.
+2. Open **SQL Editor** and run:
+
+   ```sql
+   create table if not exists public.shared_lists (
+     id text primary key,
+     people jsonb not null default '[]',
+     updated_at timestamptz not null default now()
+   );
+   insert into public.shared_lists (id, people)
+     values ('main', '[]') on conflict (id) do nothing;
+
+   alter table public.shared_lists enable row level security;
+   create policy "shared read"   on public.shared_lists for select to anon using (true);
+   create policy "shared insert" on public.shared_lists for insert to anon with check (true);
+   create policy "shared update" on public.shared_lists for update to anon using (true) with check (true);
+   ```
+3. Copy the **Project URL** and the **anon public** key from
+   **Project Settings → API** into `supabase-config.js`.
+
+That is all. With a URL configured, `index.html` opens straight to the shared
+list for every visitor — no sign-in — and every save, UPDATE LIST, toggle and
+clear writes to Supabase. Pages poll every five seconds and refresh when
+someone else changes the list (never mid-edit, so no keystroke is dropped).
+Closing the tab flushes the pending save via `sendBeacon`.
+
+Notes:
+
+- The anon key is designed to be public; access is governed by the RLS
+  policies above. Those policies intentionally allow anyone to read and write
+  the shared list — that is what makes the list visible to everyone. If the
+  list should not be public, tighten the policies and add real Supabase Auth.
+- One shared row means last write wins if two people save in the same second.
+- With `url` left empty in `supabase-config.js` the site behaves exactly as
+  before: private, per-browser files.
+- `tools/preview-server.js` serves the site with a stand-in shared backend so
+  the shared mode can be tried locally before connecting Supabase:
+  `node tools/preview-server.js` then open <http://127.0.0.1:8080>. The
+  real-browser suite expects device-local mode, so keep using
+  `python3 -m http.server 8080` for `npm run test:e2e`.
+
 ## Tests
 
 ```sh

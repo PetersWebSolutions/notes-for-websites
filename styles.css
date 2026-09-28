@@ -1126,6 +1126,33 @@ main { padding: 22px 0 8px; }
 
 /* ---------- 3 · the tally at the bottom of the list ---------- */
 
+/* The explicit UPDATE LIST save below the tally. */
+.update-list { margin-top: 18px; }
+
+.update-btn {
+  min-width: 230px;
+  padding: 14px 28px;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+}
+
+.update-btn.is-saved {
+  background: linear-gradient(150deg, var(--paid), #0a5c34);
+  box-shadow: 0 10px 22px rgba(13, 122, 69, 0.28);
+}
+
+.update-when {
+  margin: 9px 2px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.update-when.is-error { color: var(--danger); font-weight: 700; }
+
+/* Shared list mode: the list belongs to the site, not to device files. */
+body.shared-mode .back-link { display: none; }
+
 .summary-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
 .build-tag {
@@ -1433,6 +1460,8 @@ body.modal-open { overflow: hidden; }
   .stat strong { font-size: 26px; }
   .save-state { text-align: left; }
   .tap-hint { font-size: 11.5px; }
+
+  .update-btn { width: 100%; min-width: 0; }
 }
 
 /* ---------- sign-in, files and open-file context ---------- */

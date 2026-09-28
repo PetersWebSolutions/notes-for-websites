@@ -122,6 +122,9 @@
     } else openConfirm(doc);
   });
   document.getElementById("signout-btn").addEventListener("click", () => {
+    // Flush any pending tally save first. Sign-out itself only removes the
+    // session key and never touches the saved files.
+    if (typeof window.flushPendingSaves === "function") window.flushPendingSaves();
     if (!Store.signOut()) { showToast("Could not sign out. Check your browser storage and try again."); return; }
     window.location.replace("login.html");
   });
