@@ -108,24 +108,20 @@ that everyone who opens the site sees and edits**, connect a free Supabase
 project:
 
 1. Create a project at <https://supabase.com>.
-2. Open **SQL Editor** and run:
-
-   ```sql
-   create table if not exists public.shared_lists (
-     id text primary key,
-     people jsonb not null default '[]',
-     updated_at timestamptz not null default now()
-   );
-   insert into public.shared_lists (id, people)
-     values ('main', '[]') on conflict (id) do nothing;
-
-   alter table public.shared_lists enable row level security;
-   create policy "shared read"   on public.shared_lists for select to anon using (true);
-   create policy "shared insert" on public.shared_lists for insert to anon with check (true);
-   create policy "shared update" on public.shared_lists for update to anon using (true) with check (true);
-   ```
+2. Open **SQL Editor** and run the whole of
+   [`supabase/migrations/0001_shared_lists.sql`](supabase/migrations/0001_shared_lists.sql).
+   It creates the `public.shared_lists` table, seeds the `main` row, turns on
+   row-level security and adds the three anon policies. It is safe to re-run,
+   and it carries a commented block that confines the anon role to the single
+   `main` row when you want to stop the list being open to every visitor.
 3. Copy the **Project URL** and the **anon public** key from
    **Project Settings → API** into `supabase-config.js`.
+
+The connection is checked for you: `.github/workflows/supabase-connection.yml`
+reads the URL and key straight out of `supabase-config.js` once a day and
+requests the shared row exactly the way the browser does. A paused project, a
+rotated key or a dropped policy shows up as a red run instead of a silently
+device-local site. It can also be started by hand from the Actions tab.
 
 That is all. With a URL configured, `index.html` opens straight to the shared
 list for every visitor — no sign-in — and every save, UPDATE LIST, toggle and
@@ -147,6 +143,10 @@ Notes:
   `node tools/preview-server.js` then open <http://127.0.0.1:8080>. The
   real-browser suite expects device-local mode, so keep using
   `python3 -m http.server 8080` for `npm run test:e2e`.
+- `supabase-config.js` is part of the build stamp, and Vercel serves it with
+  `Cache-Control: public, max-age=0, must-revalidate`. Changing the project
+  URL or rotating the anon key therefore reaches every visitor on their next
+  load, instead of being held back by a cached copy of the old connection.
 
 ## Tests
 
@@ -155,7 +155,12 @@ npm ci
 npm test
 ```
 
-Runs the unchanged `tally.test.js` suite, the jsdom model/three-page suites, and static audits. The tests cover migration, login, file CRUD, isolation, persistence, guard branches, read-only/edit behavior, cart flow, totals, the caret state, metadata, element IDs, and the fixed-point build stamp. `tally.js` and `tally.test.js` remain byte-identical to main at `d4811a5` (also identical to PR #5 at `2f2f175`). The spec's `39beb0` reference is not available in the fetched Git history; the rebuild was verified against current main instead.
+Runs the unchanged `tally.test.js` suite, the jsdom model/three-page suites, the static audits, and `deploy.test.js`. The tests cover migration, login, file CRUD, isolation, persistence, guard branches, read-only/edit behavior, cart flow, totals, the caret state, metadata, element IDs, the fixed-point build stamp, and the deploy config: the static preset in `vercel.json`, which assets may be cached forever, that `supabase-config.js` is revalidated, and that development files are ignored rather than published. `tally.js` and `tally.test.js` remain byte-identical to main at `d4811a5` (also identical to PR #5 at `2f2f175`). The spec's `39beb0` reference is not available in the fetched Git history; the rebuild was verified against current main instead.
+
+The same commands run on GitHub for every push and pull request
+(`.github/workflows/ci.yml`): one job for the Node suites plus
+`npm run stamp:check`, and one job that installs Chromium, serves the folder on
+port 8080 and runs the real-browser suite below.
 
 Real-browser checks (requires Chromium):
 
@@ -168,9 +173,37 @@ npm run test:e2e
 
 The browser suite exercises sign-in → files → tally at 390px and 1440px, actual navigation guards, phone caret expansion, desktop header/body alignment, edit locking, refresh, reopening with a saved profile, file isolation, and sign-out. `PREVIEW_URL` can target another served URL; `CHROMIUM_PATH` can select an installed Chromium. Screenshots/results are ignored by Git. Optional remote fonts are stubbed in browser tests; application assets load normally.
 
+The suite also stubs `supabase-config.js` with an empty connection, so it drives the device-local flow whatever the repo happens to ship. Without that stub the suite fails on its first assertion as soon as a real project URL is committed: `index.html` then opens straight to the shared list and never redirects to `login.html`.
+
 ## Publishing
 
-For **Vercel**, choose preset **Other**, leave the build command empty, and set the output directory to **`.`**. No `vercel.json` is needed. Serve all three HTML pages and their sibling assets from the same origin.
+Vercel is connected through the Git integration: a push to `main` deploys
+production, and every pull request gets its own preview URL. The project
+settings live in `vercel.json` so they travel with the code instead of existing
+only in the dashboard:
+
+- `framework: null`, `buildCommand: ""`, `outputDirectory: "."` — the folder
+  itself is the site, with no toolchain in front of it.
+- `installCommand: ""` — the npm dependencies are test-only (Playwright and
+  jsdom), so a deploy does not install them and cannot fail on them.
+- Cache headers — every stamped asset is served `max-age=31536000, immutable`,
+  which is only safe because the `?v=` stamp changes whenever a shipped file
+  changes. `supabase-config.js`, the three pages, and anything else the stamp
+  does not cover are `max-age=0, must-revalidate` instead.
+- `X-Content-Type-Options: nosniff`, a `Referrer-Policy` and a
+  `Permissions-Policy` on every response.
+
+`deploy.test.js` checks all of that against the repo on every `npm test`, so a
+config that would serve stale assets, or publish the test folder, cannot be
+merged quietly.
+
+`.vercelignore` keeps development files out of the deployment, and that is not
+cosmetic: `tests/dom.cjs` encodes the default passcode and
+`tools/preview-server.js` is a stand-in shared backend. Neither belongs on a
+public URL.
+
+If the Vercel project is ever recreated: preset **Other**, empty build command,
+output directory **`.`** — the same answers `vercel.json` already gives.
 
 ### Bump the build stamp first
 
@@ -182,22 +215,15 @@ npm test
 npm run stamp:check
 ```
 
-There is no compilation: `tools/build-stamp.cjs` only updates the cache token. It reads the current `BUILD`, replaces that **exact value** with a placeholder, hashes the sorted shipped-file list with SHA-1 and uses the first six hex characters. README, manifest, tests and development tooling are excluded. The new stamp goes in `app.js` and every local stylesheet/script URL on all three pages, including the new Store script.
+There is no compilation: `tools/build-stamp.cjs` only updates the cache token. It reads the current `BUILD`, replaces that **exact value** with a placeholder, hashes the sorted shipped-file list with SHA-1 and uses the first six hex characters. README, manifest, tests and development tooling are excluded. The new stamp goes in `app.js` and every local stylesheet/script URL on all three pages, including the Store script and the Supabase connection file.
 
-For a fresh deploy-read verification, the equivalent hash command is:
+For a fresh deploy-read verification of the same hash, read-only:
 
 ```sh
-node <<'JS'
-const fs = require("node:fs"), crypto = require("node:crypto");
-const old = fs.readFileSync("app.js", "utf8").match(/const BUILD = "([a-f0-9]{6})";/)[1];
-const files = ["app.js", "favicon.svg", "index.html", "lists.html", "lists.js", "login.html", "login.js", "store.js", "styles.css", "tally.js"];
-const hash = crypto.createHash("sha1");
-files.forEach(file => hash.update(fs.readFileSync(file, "utf8").split(old).join("<stamp>")));
-const fresh = hash.digest("hex").slice(0, 6);
-console.log({ current: old, fresh });
-if (old !== fresh) process.exitCode = 1;
-JS
+node -e 'const{current,calculate}=require("./tools/build-stamp.cjs");const old=current();const fresh=calculate(old);console.log({current:old,fresh});if(old!==fresh)process.exitCode=1;'
 ```
+
+It takes its file list from `tools/build-stamp.cjs` itself, so it cannot drift from what actually ships. An earlier copy of this command carried its own list of ten files and silently went stale the day `shared-store.js` was added: it reported a mismatch on a perfectly stamped tree.
 
 Do not blank every loose six-character hex match: that also matches stylesheet colour codes. `.split(old).join("<stamp>")` blanks only the current stamp and reaches a fixed point.
 

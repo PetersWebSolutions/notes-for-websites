@@ -1,0 +1,10 @@
+# Development-only files. Nothing here is needed at runtime, and some of it
+# must never be published: tests/dom.cjs encodes the default passcode and
+# tools/preview-server.js is a local stand-in backend for the shared list.
+tests/
+tools/
+supabase/
+*.test.js
+playwright.config.cjs
+.github/
+.gitignore

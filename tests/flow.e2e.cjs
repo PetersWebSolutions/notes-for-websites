@@ -1,14 +1,25 @@
 const { test, expect } = require('@playwright/test');
 const pass = String.fromCharCode(69,108,105,116,101,50,54);
 const docsKey = 'team-elite-documents-v1';
+// This suite drives the device-local flow — sign in, pick a file, tally — which
+// index.html only enters when no Supabase connection is configured. The repo
+// may well ship a live one, so the connection file is stubbed rather than
+// depending on what happens to be committed in supabase-config.js. Routes are
+// per context, so every context the suite opens needs this, including the
+// reopened one at the end; without it that context quietly loads the live
+// shared list instead of the saved file.
+const stub = async (context) => {
+  // Only the optional external fonts are stubbed; all app files load over HTTP.
+  await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({body:'',contentType:'text/css'}));
+  await context.route('https://fonts.gstatic.com/**',route=>route.abort());
+  await context.route(/supabase-config\.js/,route=>route.fulfill({body:'window.SUPABASE_CONFIG = { url: "", anonKey: "", listId: "main" };',contentType:'application/javascript'}));
+};
 for (const width of [390, 1440]) {
   test(`${width}px: sign in → create/open → tally → caret/edit → refresh → reopen → sign out`, async ({ page, context }, testInfo) => {
     await page.setViewportSize({width, height:900});
     const errors=[];
     page.on('pageerror',e=>errors.push(e.message));
-    // Only the optional external fonts are stubbed; all app files load over HTTP.
-    await context.route('https://fonts.googleapis.com/**',route=>route.fulfill({body:'',contentType:'text/css'}));
-    await context.route('https://fonts.gstatic.com/**',route=>route.abort());
+    await stub(context);
     await page.goto('index.html');
     await expect(page).toHaveURL(/login\.html$/);
     await page.screenshot({path:testInfo.outputPath('01-login.png'),fullPage:true});
@@ -101,6 +112,7 @@ for (const width of [390, 1440]) {
     await expect(page.locator('#sum-shirts')).toHaveText('3');
     const profile=await context.storageState();
     const reopened=await context.browser().newContext({storageState:profile, viewport:{width,height:900}});
+    await stub(reopened);
     const newPage=await reopened.newPage();
     await newPage.goto(fileURL);
     await expect(newPage.locator('#sum-shirts')).toHaveText('3');

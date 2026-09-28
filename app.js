@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "e42f7b";
+const BUILD = "10149c";
 
 const Tally = window.Tally;
 
