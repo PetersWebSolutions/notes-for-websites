@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
+  <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0b1f3a">
   <meta name="description" content="TEAM ELITE PH TSHIRT sales tally. Add a name and orders, check the cart, then send the order to the list.">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16,9 +17,28 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=d02a1f">
+  <link rel="stylesheet" href="styles.css?v=f161ae">
+  <script src="store.js?v=f161ae"></script>
+  <script>
+    /* Sign in and pick a file before the page draws anything. */
+    (function () {
+      if (!window.Store || !Store.session()) {
+        window.location.replace("login.html");
+        return;
+      }
+      var id = Store.currentDocId();
+      if (!id || !Store.doc(id)) window.location.replace("lists.html");
+    })();
+  </script>
 </head>
 <body>
+  <div class="file-bar no-print">
+    <div class="wrap file-bar-inner">
+      <a class="back-link" href="lists.html">← All files</a>
+      <p class="file-now">File: <strong id="open-file-name">—</strong></p>
+      <p class="file-when" id="open-file-when"></p>
+    </div>
+  </div>
   <a class="skip" href="#orders">Skip to list</a>
 
   <header class="banner">
@@ -183,7 +203,7 @@
         </div>
       </div>
 
-      <p class="tap-hint no-print">One row per person. The sheet is read only — press <strong>EDIT</strong> on a row to change a quantity, then press <strong>DONE</strong>. PAID and UNPAID can be tapped at any time.</p>
+      <p class="tap-hint no-print">One row per person. The sheet is read only — press <strong>EDIT</strong> on a row to change a quantity, then press <strong>DONE</strong>. PAID and UNPAID can be tapped at any time. On phones, tap the caret beside a name to expand the size grid.</p>
 
       <div id="empty-state" class="empty">
         <div class="empty-shirt" aria-hidden="true">
@@ -285,7 +305,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js?v=d02a1f"></script>
-  <script src="app.js?v=d02a1f"></script>
+  <script src="tally.js?v=f161ae"></script>
+  <script src="app.js?v=f161ae"></script>
 </body>
 </html>

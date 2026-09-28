@@ -1,0 +1,138 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { boot, snapshot, KEYS, pass, ana, profile } = require('./tests/dom.cjs');
+function model(t, store = {}, url) { const b = boot('login.html', store, url, ['store.js']); t.after(b.close); return b; }
+
+test('seeds the pre-hashed first account and signs in case-insensitively', t => {
+  const { S } = model(t);
+  assert.equal(S.users().length, 1);
+  assert.equal(S.users()[0].pass, '17vlux81jd9ixt');
+  assert.equal(S.hash(pass), '17vlux81jd9ixt');
+  assert.equal(S.checkLogin('  jOyCe ', pass).name, 'Joyce');
+  assert.equal(S.checkLogin('Joyce', 'wrong'), null);
+  assert.equal(S.checkLogin('', pass), null);
+  assert.equal(S.checkLogin('Joyce', ''), null);
+});
+test('account validation, whitespace, lengths, duplicates and changing passcodes', t => {
+  const { S } = model(t);
+  assert.equal(S.addUser('', 'secret').ok, false);
+  assert.equal(S.addUser('Ben', '').ok, false);
+  assert.equal(S.addUser('Ben', ' ').ok, false);
+  assert.equal(S.addUser('Joyce', 'new').ok, false);
+  assert.equal(S.addUser('  Ben   Cruz ', 'secret').ok, true);
+  assert.equal(S.addUser('ben cruz', 'other').ok, false);
+  const ben = S.checkLogin('Ben Cruz', 'secret');
+  assert.ok(ben);
+  assert.notEqual(ben.pass, 'secret');
+  assert.equal(S.changePass(ben.id, 'new secret').ok, true);
+  assert.equal(S.checkLogin('Ben Cruz', 'secret'), null);
+  assert.ok(S.checkLogin('Ben Cruz', 'new secret'));
+  assert.equal(S.changePass('missing', 'new').ok, false);
+  assert.equal(S.changePass(ben.id, '').ok, false);
+  assert.equal(S.addUser('x'.repeat(80), 'secret').ok, true);
+  assert.equal(S.users().at(-1).name.length, 40);
+});
+test('session persists across a new window and sign-out only removes the session', t => {
+  const b = model(t);
+  assert.equal(b.S.session(), null);
+  assert.equal(b.S.signIn(b.S.checkLogin('Joyce', pass)), true);
+  b.S.createDoc('One', 'Joyce');
+  const c = model(t, snapshot(b.w));
+  assert.equal(c.S.session().name, 'Joyce');
+  assert.equal(c.S.requireSession().name, 'Joyce');
+  assert.equal(c.S.signOut(), true);
+  assert.equal(c.S.session(), null);
+  assert.equal(c.S.docs().length, 1);
+  assert.equal(c.S.users().length, 1);
+});
+test('legacy people migrate once without consuming the original key', t => {
+  const legacy = JSON.stringify([ana]);
+  const { S, w } = model(t, {[KEYS.legacy]: legacy});
+  const first = S.docs()[0];
+  assert.equal(first.name, 'Main list');
+  assert.equal(first.owner, '');
+  assert.deepEqual(JSON.parse(JSON.stringify(first.people)), [ana]);
+  assert.equal(S.docs()[0].id, first.id);
+  assert.equal(w.localStorage.getItem(KEYS.legacy), legacy);
+  assert.equal(S.deleteDoc(first.id), true);
+  assert.equal(S.docs().length, 0);
+  assert.equal(w.localStorage.getItem(KEYS.legacy), legacy);
+});
+test('file validation, cap, normalization, newest-first insertion and timestamps', t => {
+  const { S, w } = model(t);
+  assert.equal(S.createDoc(' ', 'Joyce').error, 'Give the file a name.');
+  const a = S.createDoc('  First   listing  ', 'Joyce').doc;
+  assert.equal(a.name, 'First listing');
+  assert.equal(a.owner, 'Joyce');
+  const b = S.createDoc('B'.repeat(80), 'Joyce').doc;
+  assert.equal(b.name.length, 60);
+  assert.equal(S.docs()[0].id, b.id);
+  assert.equal(S.renameDoc(a.id, ' ').ok, false);
+  assert.equal(S.renameDoc(a.id, '  New   title ').ok, true);
+  assert.equal(S.doc(a.id).name, 'New title');
+  assert.ok(S.doc(a.id).updatedAt >= a.updatedAt);
+  assert.equal(S.updateDoc(a.id, [ana]), true);
+  assert.equal(S.doc(a.id).people[0].name, ana.name);
+  assert.equal(S.updateDoc('missing', [ana]), false);
+  assert.equal(S.renameDoc('missing', 'New').ok, false);
+  assert.equal(S.deleteDoc('missing'), false);
+  w.localStorage.setItem(KEYS.docs, JSON.stringify(Array.from({length:200}, (_,i)=>({id:String(i),people:[]}))));
+  assert.equal(S.createDoc('Over limit', '').ok, false);
+});
+test('per-file isolation, deletion and device marker', t => {
+  const { S, w } = model(t, profile());
+  const before = JSON.stringify(S.doc('b'));
+  assert.equal(S.updateDoc('a', []), true);
+  assert.equal(JSON.stringify(S.doc('b')), before);
+  S.renameDoc('a', 'Renamed');
+  assert.equal(JSON.stringify(S.doc('b')), before);
+  assert.equal(S.deleteDoc('a'), true);
+  assert.equal(JSON.stringify(S.doc('b')), before);
+  assert.equal(S.deviceHasHeldAList(), false);
+  S.touchDevice();
+  assert.equal(w.localStorage.getItem(KEYS.used), '1');
+  assert.equal(S.deviceHasHeldAList(), true);
+});
+test('query parsing handles absent, encoded and malformed ids', t => {
+  assert.equal(model(t, {}, 'https://example.test/index.html').S.currentDocId(), '');
+  assert.equal(model(t, {}, 'https://example.test/index.html?x=1&doc=a%20b').S.currentDocId(), 'a b');
+  assert.equal(model(t, {}, 'https://example.test/index.html?doc=%E0').S.currentDocId(), '');
+});
+test('corrupt storage falls back safely', t => {
+  const { S } = model(t, {[KEYS.docs]:'oops',[KEYS.users]:'null',[KEYS.session]:'[]'});
+  assert.equal(S.docs().length, 0);
+  assert.equal(S.users()[0].name, 'Joyce');
+  assert.equal(S.session(), null);
+});
+test('blocked/quota-full storage never throws or reports a successful write', t => {
+  const { S, w } = model(t, profile());
+  w.Storage.prototype.setItem = () => { throw new Error('quota'); };
+  assert.equal(S.createDoc('New', 'Joyce').ok, false);
+  assert.equal(S.updateDoc('a', []), false);
+  assert.equal(S.renameDoc('a', 'New').ok, false);
+  assert.equal(S.deleteDoc('a'), false);
+  assert.equal(S.addUser('Ben', 'secret').ok, false);
+  assert.equal(S.signIn({id:'u',name:'User'}), false);
+  assert.equal(S.touchDevice(), false);
+  w.Storage.prototype.getItem = () => { throw new Error('blocked'); };
+  w.Storage.prototype.removeItem = () => { throw new Error('blocked'); };
+  assert.equal(S.session(), null);
+  assert.equal(S.docs().length, 0);
+  assert.equal(S.users()[0].name, 'Joyce');
+  assert.equal(S.signOut(), false);
+  assert.equal(S.deviceHasHeldAList(), false);
+});
+test('relative dates cover minute, hour, day and absolute date boundaries', t => {
+  const { S, w } = model(t);
+  const now=Date.UTC(2026,8,28,12); w.Date.now=()=>now;
+  assert.equal(S.relative(now), 'just now');
+  assert.equal(S.relative(now-60000), '1 minute ago');
+  assert.equal(S.relative(now-120000), '2 minutes ago');
+  assert.equal(S.relative(now-3600000), '1 hour ago');
+  assert.equal(S.relative(now-7200000), '2 hours ago');
+  assert.equal(S.relative(now-86400000), 'yesterday');
+  assert.equal(S.relative(now-3*86400000), '3 days ago');
+  assert.equal(S.relative(now-8*86400000), S.formatDate(now-8*86400000));
+  assert.match(S.formatDate(now), /2026/);
+});
