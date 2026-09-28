@@ -16,7 +16,7 @@
  * the table is governed by the row-level-security policies from step 2.
  */
 window.SUPABASE_CONFIG = {
-  url: "",
-  anonKey: "",
+  url: "https://xgaojserktdecclcaptdd.supabase.co",
+  anonKey: "sb_publishable_AYpE-D48rLe2aT1Vh3yBHg_K25eCwcD",
   listId: "main"
 };
