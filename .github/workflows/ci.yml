@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Model, pages, static and deploy config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install test-only dependencies
+        run: npm ci
+
+      - name: Run the unit, page, static and deploy-config suites
+        run: npm test
+
+      - name: Build stamp is current
+        # A stale ?v= serves old scripts against new HTML, which is the
+        # failure mode vercel.json's immutable cache headers depend on.
+        run: npm run stamp:check
+
+  browser:
+    name: Real browser flow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install test-only dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Serve the folder as a static site on :8080
+        # The real-browser suite expects device-local mode, so it is served
+        # with a plain static server rather than tools/preview-server.js.
+        run: |
+          python3 -m http.server 8080 --bind 0.0.0.0 >/tmp/http.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/login.html >/dev/null && exit 0
+            sleep 1
+          done
+          echo "static server did not come up" >&2
+          cat /tmp/http.log >&2
+          exit 1
+
+      - name: Run the real-browser suite
+        run: npm run test:e2e
+
+      - name: Upload failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore

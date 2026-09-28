@@ -1,0 +1,80 @@
+name: Supabase connection
+
+# Daily proof that the shipped Supabase connection still answers. A free
+# Supabase project pauses after a week without traffic, and a rotated anon
+# key fails quietly in the browser, so this pings the same endpoint the
+# site uses with the same key the site ships.
+
+on:
+  schedule:
+    - cron: '25 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Shared list endpoint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read the connection the site ships
+        id: config
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const window = {};
+            new Function("window", fs.readFileSync("supabase-config.js", "utf8"))(window);
+            const config = window.SUPABASE_CONFIG || {};
+            const url = String(config.url || "").replace(/\/+$/, "");
+            if (!/^https?:\/\//.test(url) || !config.anonKey) {
+              console.log("connected=false");
+            } else {
+              console.log("connected=true");
+              console.log("url=" + url);
+              console.log("list=" + (config.listId || "main"));
+              console.log("key=" + config.anonKey);
+            }
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Report when the site is in device-local mode
+        if: steps.config.outputs.connected != 'true'
+        run: echo "supabase-config.js holds no project URL; the site is device-local and there is nothing to ping."
+
+      - name: GET the shared list row with the shipped anon key
+        if: steps.config.outputs.connected == 'true'
+        env:
+          SUPABASE_URL: ${{ steps.config.outputs.url }}
+          SUPABASE_KEY: ${{ steps.config.outputs.key }}
+          LIST_ID: ${{ steps.config.outputs.list }}
+        run: |
+          status=$(curl -sS -o /tmp/row.json -w '%{http_code}' \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/shared_lists?id=eq.$LIST_ID&select=id,updated_at")
+          echo "HTTP $status"
+          cat /tmp/row.json
+          echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Shared list request returned HTTP $status. The project may be paused, the anon key rotated, or the RLS policies removed."
+            exit 1
+          fi
+
+      - name: Confirm the shared row still exists
+        if: steps.config.outputs.connected == 'true'
+        run: |
+          node -e '
+            const rows = JSON.parse(require("node:fs").readFileSync("/tmp/row.json", "utf8"));
+            if (!Array.isArray(rows) || !rows.length) {
+              console.error("::error::The endpoint answered but the shared row is missing. Re-run the migration in supabase/migrations/.");
+              process.exitCode = 1;
+            } else {
+              console.log("shared row present, updated_at=" + rows[0].updated_at);
+            }
+          '
