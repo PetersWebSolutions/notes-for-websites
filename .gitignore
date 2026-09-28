@@ -1,3 +1,5 @@
 node_modules/
 test-results/
 playwright-report/
+.preview-shared-data.json
+.test-shared-data.json

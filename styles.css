@@ -1150,6 +1150,9 @@ main { padding: 22px 0 8px; }
 
 .update-when.is-error { color: var(--danger); font-weight: 700; }
 
+/* Shared list mode: the list belongs to the site, not to device files. */
+body.shared-mode .back-link { display: none; }
+
 .summary-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
 .build-tag {

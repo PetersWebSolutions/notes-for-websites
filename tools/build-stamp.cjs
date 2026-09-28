@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 // Explicit, sorted list of shipped code/assets. README, manifest and tests are
 // deliberately excluded. No runtime dependency or build step is introduced.
-const files = ['app.js', 'favicon.svg', 'index.html', 'lists.html', 'lists.js', 'login.html', 'login.js', 'store.js', 'styles.css', 'tally.js'];
+const files = ['app.js', 'favicon.svg', 'index.html', 'lists.html', 'lists.js', 'login.html', 'login.js', 'shared-store.js', 'store.js', 'styles.css', 'tally.js'];
 function current() { return fs.readFileSync('app.js', 'utf8').match(/const BUILD = "([a-f0-9]{6})";/)[1]; }
 function calculate(old = current()) {
   const hash = crypto.createHash('sha1');

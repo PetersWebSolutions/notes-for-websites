@@ -5,10 +5,19 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "f7bce4";
+const BUILD = "e42f7b";
 
 const Tally = window.Tally;
-const DOC = window.Store ? Store.doc(Store.currentDocId()) : null;
+
+/*
+ * Shared mode: with a Supabase connection in supabase-config.js the tally
+ * reads and writes one shared list that every visitor sees. Without it, the
+ * original device-local behavior is untouched.
+ */
+const SHARED = Boolean(window.SharedStore && window.SharedStore.enabled());
+const DOC = SHARED
+  ? { id: SharedStore.listId(), name: "Shared list", owner: "", createdAt: Date.now(), updatedAt: Date.now(), people: [] }
+  : (window.Store ? Store.doc(Store.currentDocId()) : null);
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -102,32 +111,63 @@ function hasColor(person, color) {
 
 /* ---------- storage ---------- */
 
+/* Normalize stored rows; shared by the device files and the shared list. */
+function restorePeople(arr) {
+  const restored = [];
+  let skipped = 0;
+  (Array.isArray(arr) ? arr : []).forEach((item) => {
+    // The oldest backups stored one shirt per row ({ name, size, color,
+    // paid }). Migrate them like restore does, or their shirts would be
+    // dropped when the file opens.
+    const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
+    const person = legacy
+      ? Tally.migrateLegacyOrder(item, uid)
+      : Tally.normalizePerson(item, uid);
+    if (person) restored.push(person);
+    else skipped += 1;
+  });
+  return { restored: restored.slice(0, Tally.MAX_PEOPLE), skipped };
+}
+
 function loadPeople() {
   if (!DOC) return [];
   try {
-    const arr = Array.isArray(DOC.people) ? DOC.people : [];
-    const restored = [];
-    let skipped = 0;
-    arr.forEach((item) => {
-      // The oldest backups stored one shirt per row ({ name, size, color,
-      // paid }). Migrate them like restore does, or their shirts would be
-      // dropped when the file opens.
-      const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
-      const person = legacy
-        ? Tally.migrateLegacyOrder(item, uid)
-        : Tally.normalizePerson(item, uid);
-      if (person) restored.push(person);
-      else skipped += 1;
-    });
+    const { restored, skipped } = restorePeople(DOC.people);
     if (skipped) pendingNotice = "Some saved rows were skipped because they were incomplete.";
-    return restored.slice(0, Tally.MAX_PEOPLE);
+    return restored;
   } catch (error) {
     pendingNotice = "Could not read the saved list. Starting fresh on this device.";
     return [];
   }
 }
 
+/*
+ * Shared-mode write. Optimistic: the screen updates immediately, the line
+ * under the list reports the network result, and a closing tab uses
+ * sendBeacon so the write still lands. Device storage is never touched.
+ */
+function saveShared() {
+  const state = document.getElementById("save-state");
+  const leaving = document.visibilityState === "hidden";
+  const at = Date.now();
+  DOC.updatedAt = at;
+  showOpenFile();
+  state.classList.remove("is-error");
+  state.textContent = "Saving to the shared list…";
+  SharedStore.save(people, { beacon: leaving, at }).then((ok) => {
+    if (ok) {
+      SharedStore.rememberWrite(at);
+      state.textContent = `Saved in ${DOC.name} · ${stamp()}`;
+    } else {
+      state.classList.add("is-error");
+      state.textContent = "Could not reach the shared database. The list is still on this screen — press UPDATE LIST to try again.";
+    }
+  });
+  return true;
+}
+
 function savePeople() {
+  if (SHARED) return saveShared();
   if (!DOC) return false;
   const state = document.getElementById("save-state");
   try {
@@ -169,7 +209,9 @@ function saveNow() {
   const ok = savePeople();
   if (ok) {
     flashSaved();
-    showToast("List saved on this device. It will be here when you come back.");
+    showToast(SHARED
+      ? "Saved to the shared list. Everyone viewing the site sees this list."
+      : "List saved on this device. It will be here when you come back.");
     announce(`List saved. ${Tally.peopleLabel(people.length)} on the list.`);
   } else {
     showToast("Could not save on this device. Export a backup before you leave.");
@@ -193,9 +235,13 @@ function flashSaved() {
  * toast appears. With no file open it writes nothing and points to Files.
  */
 let updateTimer = 0;
-function updateList() {
+async function updateList() {
   const button = document.getElementById("update-list-btn");
   const when = document.getElementById("update-when");
+  if (SHARED) {
+    await updateSharedList(button, when);
+    return;
+  }
   if (!DOC || !Store.doc(DOC.id)) {
     when.classList.add("is-error");
     when.textContent = "No file is open here. Go to the Files page and open a file before saving.";
@@ -225,6 +271,45 @@ function updateList() {
   }, 2200);
   showToast("List saved on this device. It will be here when you come back.");
   announce(`List saved in ${DOC.name}. ${Tally.peopleLabel(people.length)} on the list.`);
+}
+
+/*
+ * UPDATE LIST in shared mode: force-write to the shared database and wait
+ * for the answer before confirming, so "Saved ✓" is always the truth.
+ */
+async function updateSharedList(button, when) {
+  window.clearTimeout(saveTimer);
+  saveTimer = 0;
+  button.disabled = true;
+  button.textContent = "Saving…";
+  const at = Date.now();
+  const ok = await SharedStore.save(people, { at });
+  button.disabled = false;
+  if (!ok) {
+    button.textContent = "UPDATE LIST";
+    when.classList.add("is-error");
+    when.textContent = "Could not reach the shared database. Check your connection and press UPDATE LIST again.";
+    showToast("Could not reach the shared database. Your list is still on this screen — try again.");
+    return;
+  }
+  DOC.updatedAt = at;
+  SharedStore.rememberWrite(at);
+  showOpenFile();
+  const state = document.getElementById("save-state");
+  state.classList.remove("is-error");
+  state.textContent = `Saved in ${DOC.name} · ${stamp()}`;
+  flashSaved();
+  when.classList.remove("is-error");
+  when.textContent = `Last saved ${stamp()}`;
+  window.clearTimeout(updateTimer);
+  button.textContent = "Saved ✓";
+  button.classList.add("is-saved");
+  updateTimer = window.setTimeout(() => {
+    button.textContent = "UPDATE LIST";
+    button.classList.remove("is-saved");
+  }, 2200);
+  showToast("Saved to the shared list. Everyone viewing the site sees this list.");
+  announce(`List saved to the shared list. ${Tally.peopleLabel(people.length)} on the list.`);
 }
 
 /*
@@ -1260,6 +1345,53 @@ function fillPrices() {
   }
 }
 
+/* ---------- shared list: boot and live refresh ---------- */
+
+/* Never swap the list in while the person here is mid-change. */
+function sharedBusy() {
+  if (editingId || saveTimer) return true;
+  const modal = document.getElementById("confirm-modal");
+  if (modal && !modal.hidden) return true;
+  const active = document.activeElement;
+  if (active && typeof active.closest === "function" && active.closest("#order-body")) return true;
+  return false;
+}
+
+function applySharedRemote(remotePeople) {
+  const before = JSON.stringify(people);
+  const { restored } = restorePeople(remotePeople);
+  if (JSON.stringify(restored) === before) return;
+  if (sharedBusy()) return; // the next poll tries again
+  people = restored;
+  highlightId = null;
+  editingId = null;
+  render();
+  const state = document.getElementById("save-state");
+  state.classList.remove("is-error");
+  state.textContent = `Shared list updated by someone else · ${stamp()}`;
+  announce("The shared list just changed and was refreshed.");
+}
+
+async function loadSharedList() {
+  const state = document.getElementById("save-state");
+  state.classList.remove("is-error");
+  state.textContent = "Loading the shared list…";
+  try {
+    const data = await SharedStore.load();
+    const { restored, skipped } = restorePeople(data.people);
+    people = restored;
+    DOC.updatedAt = data.updatedAt || Date.now();
+    render();
+    state.textContent = "Connected to the shared list — everyone on this site sees the same names.";
+    if (skipped) showToast("Some saved rows were skipped because they were incomplete.");
+    SharedStore.startPoll(applySharedRemote);
+  } catch (error) {
+    state.classList.add("is-error");
+    state.textContent = "Could not load the shared list. Check your connection, then press Retry.";
+    showToast("Could not load the shared list.", "Retry", loadSharedList);
+  }
+}
+
 /* ---------- wiring ---------- */
 
 function bind() {
@@ -1423,12 +1555,21 @@ function init() {
   fillSizeOptions();
   buildCols();
   buildHead();
-  people = loadPeople();
-  bind();
-  render();
-  renderCart();
-  checkStorageLoss();
-  if (pendingNotice) showToast(pendingNotice);
+  if (SHARED) {
+    document.body.classList.add("shared-mode");
+    people = [];
+    bind();
+    render();
+    renderCart();
+    loadSharedList();
+  } else {
+    people = loadPeople();
+    bind();
+    render();
+    renderCart();
+    checkStorageLoss();
+    if (pendingNotice) showToast(pendingNotice);
+  }
   if (!window.matchMedia || !window.matchMedia("(max-width: 800px)").matches) {
     nameInput.focus();
   }

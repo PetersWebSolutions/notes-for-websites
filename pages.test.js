@@ -23,6 +23,16 @@ test('inline guard: missing Store, missing session, missing/unknown doc, and val
   guard(window, fake);
   assert.deepEqual(seen, []);
 });
+test('inline guard: shared mode is open to everyone, with or without a session', () => {
+  const source = read('index.html').match(/\(function \(\) \{[\s\S]*?\}\)\(\);/)[0];
+  const guard = new Function('window', 'Store', source);
+  const seen=[];
+  const window={location:{replace:u=>seen.push(u)},SharedStore:{enabled:()=>true}};
+  guard(window, undefined);
+  assert.deepEqual(seen, []);
+  guard({...window,SharedStore:{enabled:()=>false}}, {session:()=>null});
+  assert.deepEqual(seen, ['login.html']);
+});
 test('login focus, wrong passcode, input clears error, and successful persistent session', t => {
   const b=page(t, 'login.html');
   assert.equal(b.w.document.activeElement.id, 'login-name');
