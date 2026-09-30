@@ -17,10 +17,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=5f6075">
-  <script src="store.js?v=5f6075"></script>
-  <script src="supabase-config.js?v=5f6075"></script>
-  <script src="shared-store.js?v=5f6075"></script>
+  <link rel="stylesheet" href="styles.css?v=f0034b">
+  <script src="store.js?v=f0034b"></script>
+  <script src="supabase-config.js?v=f0034b"></script>
+  <script src="shared-store.js?v=f0034b"></script>
   <script>
     /*
      * Everyone signs in first, then picks a list on lists.html. Shared mode
@@ -50,6 +50,7 @@
         <select id="list-picker" aria-label="Open another shared list"></select>
       </label>
       <p class="file-when" id="open-file-when"></p>
+      <p id="open-file-owner"></p>
       <p class="file-who" id="signed-in-as"></p>
       <button class="ghost-btn signout-btn" id="signout-btn" type="button">Sign out</button>
     </div>
@@ -141,6 +142,7 @@
       </form>
     </section>
 
+    <p id="read-only-note" hidden>This list is view only. Save a copy with SAVE LIST AS to edit it.</p>
     <!-- ===== 2 · CART ===== -->
     <section class="step" id="step-cart" aria-labelledby="step2-title">
       <div class="step-head">
@@ -347,7 +349,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js?v=5f6075"></script>
-  <script src="app.js?v=5f6075"></script>
+  <script src="tally.js?v=f0034b"></script>
+  <script src="app.js?v=f0034b"></script>
 </body>
 </html>

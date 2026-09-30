@@ -37,12 +37,14 @@ const SharedStore = (function () {
       id: String(row.id),
       name: row.name ? String(row.name) : (row.id === "main" ? "Shared list" : String(row.id)),
       updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
-      updatedBy: row.updated_by ? String(row.updated_by) : ""
+      updatedBy: row.updated_by ? String(row.updated_by) : "",
+      createdBy: row.created_by ? String(row.created_by) : ""
     };
   }
 
   /* Remembered once a 400 shows the project lacks the 0002 columns. */
   let legacySchema = false;
+  const EXTRA_COLS = ",name,updated_by,created_by";
 
   function headers(extra) {
     return Object.assign({
@@ -57,9 +59,9 @@ const SharedStore = (function () {
 
   async function getRows(query) {
     let res = await fetch(`${endpoint()}?${query}`, { method: "GET", headers: headers() });
-    if (res.status === 400 && !legacySchema && /name|updated_by/.test(query)) {
+    if (res.status === 400 && !legacySchema && /name|updated_by|created_by/.test(query)) {
       legacySchema = true;
-      res = await fetch(`${endpoint()}?${query.replace(/,name,updated_by/, "")}`, { method: "GET", headers: headers() });
+      res = await fetch(`${endpoint()}?${query.replace(EXTRA_COLS, "")}`, { method: "GET", headers: headers() });
     }
     if (!res.ok) throw new Error(`Shared list load failed (${res.status}).`);
     const rows = await res.json();
@@ -67,7 +69,7 @@ const SharedStore = (function () {
   }
 
   async function load() {
-    const rows = await getRows(`id=eq.${encodeURIComponent(listId())}&select=people,updated_at,name,updated_by`);
+    const rows = await getRows(`id=eq.${encodeURIComponent(listId())}&select=people,updated_at,name,updated_by,created_by`);
     const row = rows.length ? rows[0] : null;
     const info = row ? meta(Object.assign({ id: listId() }, row)) : meta({ id: listId() });
     return {
@@ -75,6 +77,7 @@ const SharedStore = (function () {
       updatedAt: info.updatedAt,
       name: info.name,
       updatedBy: info.updatedBy,
+      createdBy: info.createdBy,
       exists: Boolean(row)
     };
   }
@@ -82,7 +85,7 @@ const SharedStore = (function () {
   /* Every shared list, newest change first. withPeople adds the rows' names. */
   async function listAll(options = {}) {
     try {
-      const cols = options.withPeople ? "id,updated_at,people,name,updated_by" : "id,updated_at,name,updated_by";
+      const cols = options.withPeople ? `id,updated_at,people${EXTRA_COLS}` : `id,updated_at${EXTRA_COLS}`;
       const rows = await getRows(`select=${cols}&order=updated_at.desc&limit=200`);
       return rows.map((row) => Object.assign(meta(row), { people: Array.isArray(row.people) ? row.people : [] }));
     } catch (error) { throw error; }
@@ -93,10 +96,10 @@ const SharedStore = (function () {
     try {
       const res = await fetch(`${endpoint()}?id=eq.${encodeURIComponent(id)}`, {
         method: "PATCH",
-        headers: headers({ Prefer: "return=minimal" }),
+        headers: headers({ Prefer: "return=representation" }),
         body: JSON.stringify({ name: String(name).slice(0, 80) })
       });
-      return res.ok;
+      return res.ok && (await res.json()).length > 0;
     } catch (error) { return false; }
   }
 
@@ -105,15 +108,16 @@ const SharedStore = (function () {
     try {
       const res = await fetch(`${endpoint()}?id=eq.${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: headers({ Prefer: "return=minimal" })
+        headers: headers({ Prefer: "return=representation" })
       });
-      return res.ok;
+      return res.ok && (await res.json()).length > 0;
     } catch (error) { return false; }
   }
 
   function rowFor(people, at, options = {}) {
     const row = { id: options.id || listId(), people, updated_at: new Date(at || Date.now()).toISOString() };
     if (!legacySchema) {
+      if (options.createdBy) row.created_by = String(options.createdBy).slice(0, 80);
       if (options.by) row.updated_by = String(options.by).slice(0, 80);
       if (options.name) row.name = String(options.name).slice(0, 80);
     }
@@ -126,7 +130,7 @@ const SharedStore = (function () {
       headers: headers({ Prefer: "resolution=merge-duplicates" }),
       body: JSON.stringify(row)
     });
-    if (res.status === 400 && !legacySchema && (row.updated_by !== undefined || row.name !== undefined)) {
+    if (res.status === 400 && !legacySchema && (row.created_by === undefined && (row.updated_by !== undefined || row.name !== undefined))) {
       legacySchema = true;
       const { id, people, updated_at } = row;
       res = await fetch(endpoint(), {
@@ -143,7 +147,7 @@ const SharedStore = (function () {
     const slug = String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "list";
     const id = `${slug}-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 5)}`;
     try {
-      const ok = await post(rowFor(people, Date.now(), { id, name, by }));
+      const ok = await post(rowFor(people, Date.now(), { id, name, by, createdBy: by }));
       return ok ? id : "";
     } catch (error) { return ""; }
   }

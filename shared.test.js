@@ -74,7 +74,7 @@ test('shared-store.js round-trips one shared row through the Supabase-shaped API
   const joyce = visitor();
   t.after(joyce.close);
   assert.equal(joyce.w.SharedStore.enabled(), true);
-  assert.deepEqual(plain(await joyce.w.SharedStore.load()), { people: [], updatedAt: 0, name: 'Shared list', updatedBy: '', exists: false });
+  assert.deepEqual(plain(await joyce.w.SharedStore.load()), { people: [], updatedAt: 0, name: 'Shared list', updatedBy: '', createdBy: '', exists: false });
   assert.equal(await joyce.w.SharedStore.save([ana], { at: 1759000000000, by: 'Joyce' }), true);
   const back = await joyce.w.SharedStore.load();
   assert.deepEqual(plain(back.people), [ana]);
@@ -308,4 +308,71 @@ test('lists page in shared mode: an unreachable database shows an error, not an 
   await tick();
   assert.equal(b.q('#files-load-error').hidden, false);
   assert.match(b.q('#files-load-error').textContent, /Could not load the saved lists/);
+});
+
+
+test('shared store detects silently refused rename and delete', async t => {
+  const dom = new JSDOM('<body></body>', { url: 'https://example.test/', runScripts: 'dangerously' });
+  t.after(() => dom.window.close());
+  dom.window.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k' };
+  const calls = [];
+  dom.window.fetch = async (url, opts) => { calls.push(opts); return { ok: true, json: async () => [] }; };
+  const script = dom.window.document.createElement('script');
+  script.textContent = read('shared-store.js');
+  dom.window.document.body.append(script);
+  assert.equal(await dom.window.SharedStore.rename('missing', 'New name'), false);
+  assert.equal(await dom.window.SharedStore.remove('missing'), false);
+  assert.equal(calls[0].headers.Prefer, 'return=representation');
+  assert.equal(calls[1].headers.Prefer, 'return=representation');
+  dom.window.fetch = async () => ({ ok: true, json: async () => [{ id: 'exists' }] });
+  assert.equal(await dom.window.SharedStore.rename('exists', 'New name'), true);
+  assert.equal(await dom.window.SharedStore.remove('exists'), true);
+});
+
+test('shared list owner sees editing actions; others only VIEW', async t => {
+  const b = sharedListsBoot(t, { lists: [
+    { id: 'mine', name: 'Mine', createdBy: 'Joyce', people: [] },
+    { id: 'theirs', name: 'Theirs', createdBy: 'Gen', people: [] }
+  ] });
+  await tick();
+  assert.match(b.q('[data-rename="mine"]').outerHTML, /Rename/);
+  assert.equal(b.q('[data-rename="theirs"]'), null);
+  assert.equal(b.q('[data-delete="theirs"]'), null);
+  assert.match(b.q('.file-list, #file-list').textContent, /Gen's list · view only/);
+  assert.match(b.q('a[href="index.html?list=theirs"]').textContent, /VIEW/);
+});
+
+test('shared list made by another account is read-only but can be copied', async t => {
+  const b = sharedBoot(t, { people: [ana], session: true });
+  // Ownership can change on a remote refresh even when the people are unchanged.
+  await tick();
+  b.w.__sharedCalls.remote([ana], 1759000001000, { createdBy: 'Gen', updatedBy: 'Gen' });
+  assert.equal(b.q('#read-only-note').hidden, false);
+  assert.equal(b.q('#step-order').hidden, true);
+  assert.equal(b.q('#step-cart').hidden, true);
+  assert.equal(b.q('#update-list-btn').hidden, true);
+  assert.equal(b.q('#restore-btn').hidden, true);
+  assert.equal(b.q('.pay-pill').disabled, true);
+  assert.equal(b.q('[data-action="edit"]'), null);
+  assert.equal(b.q('[data-action="claim"]'), null);
+  b.q('#save-as-btn').click();
+  input(b, '#save-as-name', 'My copy');
+  b.q('#save-as-form').dispatchEvent(new b.w.Event('submit', { bubbles: true, cancelable: true }));
+  await tick();
+  assert.equal(b.w.__sharedCalls.created.length, 1);
+  assert.equal(b.w.__sharedCalls.save.length, 0);
+});
+
+test('new shared rows record their maker in created_by', async t => {
+  const dom = new JSDOM('<body></body>', { url: 'https://example.test/', runScripts: 'dangerously' });
+  t.after(() => dom.window.close());
+  dom.window.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k' };
+  let row;
+  dom.window.fetch = async (url, opts) => { row = JSON.parse(opts.body); return { ok: true }; };
+  const script = dom.window.document.createElement('script');
+  script.textContent = read('shared-store.js');
+  dom.window.document.body.append(script);
+  assert.match(await dom.window.SharedStore.create('A list', [], 'Joyce'), /^a-list-/);
+  assert.equal(row.created_by, 'Joyce');
+  assert.equal(row.updated_by, 'Joyce');
 });
