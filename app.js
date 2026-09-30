@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "10149c";
+const BUILD = "5f6075";
 
 const Tally = window.Tally;
 
@@ -16,8 +16,11 @@ const Tally = window.Tally;
  */
 const SHARED = Boolean(window.SharedStore && window.SharedStore.enabled());
 const DOC = SHARED
-  ? { id: SharedStore.listId(), name: "Shared list", owner: "", createdAt: Date.now(), updatedAt: Date.now(), people: [] }
+  ? { id: SharedStore.listId(), name: SharedStore.listId() === "main" ? "Shared list" : SharedStore.listId(),
+    owner: "", createdAt: Date.now(), updatedAt: Date.now(), updatedBy: "", people: [] }
   : (window.Store ? Store.doc(Store.currentDocId()) : null);
+/* Who is signed in — stamped on every save as "last modified by". */
+const ME = (window.Store && Store.session() && Store.session().name) || "";
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -109,6 +112,65 @@ function hasColor(person, color) {
   return Tally.normalizeItems(person.items).some((item) => item.color === color);
 }
 
+/* ---------- claimed shirts ----------
+ * A buyer may take part of an order now and the rest later (a size that is
+ * not in stock yet). person.claimed holds how many shirts of each
+ * color|size cell have been handed over. Tally.normalizePerson does not know
+ * the field, so it is re-attached and clamped to the ordered quantity here.
+ */
+function cellKey(color, size) { return `${color}|${size}`; }
+
+function normalizeClaims(raw, items) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  Tally.normalizeItems(items).forEach((item) => {
+    const key = cellKey(item.color, item.size);
+    const n = Math.min(item.qty, Math.max(0, Math.floor(Number(raw[key]) || 0)));
+    if (n) out[key] = n;
+  });
+  return out;
+}
+
+function withClaims(person, raw) {
+  if (person) person.claimed = normalizeClaims(raw && raw.claimed, person.items);
+  return person;
+}
+
+function claimedQty(person, color, size) {
+  return (person && person.claimed && person.claimed[cellKey(color, size)]) || 0;
+}
+
+/* { claimed, total, waiting: [{ color, size, qty, claimed }] } */
+function claimTotals(person) {
+  let claimed = 0;
+  let total = 0;
+  const waiting = [];
+  const done = [];
+  Tally.normalizeItems(person && person.items).forEach((item) => {
+    const got = claimedQty(person, item.color, item.size);
+    claimed += got;
+    total += item.qty;
+    if (got < item.qty) waiting.push({ color: item.color, size: item.size, qty: item.qty, claimed: got });
+    else done.push({ color: item.color, size: item.size, qty: item.qty, claimed: got });
+  });
+  return { claimed, total, waiting, done };
+}
+
+/* "none" (nothing handed over yet), "part", or "all". */
+function claimState(person) {
+  const t = claimTotals(person);
+  if (!t.total || !t.claimed) return "none";
+  return t.claimed >= t.total ? "all" : "part";
+}
+
+function describeClaims(person) {
+  const t = claimTotals(person);
+  if (!t.total) return "";
+  if (!t.claimed) return "Not claimed";
+  if (!t.waiting.length) return "All claimed";
+  return `${t.claimed} of ${t.total} claimed; waiting: ${t.waiting.map((w) => `${w.color} ${w.size} ×${w.qty - w.claimed}`).join(", ")}`;
+}
+
 /* ---------- storage ---------- */
 
 /* Normalize stored rows; shared by the device files and the shared list. */
@@ -122,7 +184,7 @@ function restorePeople(arr) {
     const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
     const person = legacy
       ? Tally.migrateLegacyOrder(item, uid)
-      : Tally.normalizePerson(item, uid);
+      : withClaims(Tally.normalizePerson(item, uid), item);
     if (person) restored.push(person);
     else skipped += 1;
   });
@@ -151,10 +213,11 @@ function saveShared() {
   const leaving = document.visibilityState === "hidden";
   const at = Date.now();
   DOC.updatedAt = at;
+  DOC.updatedBy = ME;
   showOpenFile();
   state.classList.remove("is-error");
   state.textContent = "Saving to the shared list…";
-  SharedStore.save(people, { beacon: leaving, at }).then((ok) => {
+  SharedStore.save(people, { beacon: leaving, at, by: ME }).then((ok) => {
     if (ok) {
       SharedStore.rememberWrite(at);
       state.textContent = `Saved in ${DOC.name} · ${stamp()}`;
@@ -171,7 +234,7 @@ function savePeople() {
   if (!DOC) return false;
   const state = document.getElementById("save-state");
   try {
-    if (!Store.updateDoc(DOC.id, people)) throw new Error("no such file");
+    if (!Store.updateDoc(DOC.id, people, ME)) throw new Error("no such file");
     if (people.length) Store.touchDevice();
     const saved = Store.doc(DOC.id);
     if (saved) Object.assign(DOC, saved);
@@ -283,7 +346,7 @@ async function updateSharedList(button, when) {
   button.disabled = true;
   button.textContent = "Saving…";
   const at = Date.now();
-  const ok = await SharedStore.save(people, { at });
+  const ok = await SharedStore.save(people, { at, by: ME });
   button.disabled = false;
   if (!ok) {
     button.textContent = "UPDATE LIST";
@@ -293,6 +356,7 @@ async function updateSharedList(button, when) {
     return;
   }
   DOC.updatedAt = at;
+  DOC.updatedBy = ME;
   SharedStore.rememberWrite(at);
   showOpenFile();
   const state = document.getElementById("save-state");
@@ -426,6 +490,7 @@ function addPersonToList() {
     name,
     items,
     paid: false,
+    claimed: {},
     createdAt: Date.now()
   };
   people.push(person);
@@ -555,6 +620,9 @@ function visiblePeople() {
   if (filter === "unpaid") list = list.filter((person) => !person.paid);
   if (filter === "white") list = list.filter((person) => hasColor(person, "white"));
   if (filter === "blue") list = list.filter((person) => hasColor(person, "blue"));
+  // Someone with one shirt claimed and one waiting appears in both lists.
+  if (filter === "claimed") list = list.filter((person) => claimTotals(person).claimed > 0);
+  if (filter === "unclaimed") list = list.filter((person) => claimTotals(person).waiting.length > 0);
 
   const byTime = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
   if (sortMode === "name") {
@@ -625,6 +693,10 @@ function qtyCell(person, color, size, value, editing) {
     "data-cell": key
   });
 
+  const got = value ? claimedQty(person, color, size) : 0;
+  const state = !value ? "" : got >= value ? "all" : got ? "part" : "none";
+  if (state) cell.classList.add(`claim-${state}`);
+
   if (editing) {
     cell.append(h("input", {
       class: "qty-input",
@@ -637,22 +709,46 @@ function qtyCell(person, color, size, value, editing) {
       "data-cell-input": key,
       "aria-label": `${colorLabel(color)} ${size} quantity for ${person.name}`
     }));
+    if (value) {
+      cell.append(h("button", {
+        type: "button",
+        class: `claim-toggle claim-${state}`,
+        "data-action": "claim",
+        "data-claim": key,
+        "aria-pressed": state === "all" ? "true" : "false",
+        title: "Tap once per shirt handed over. Past the last one resets.",
+        "aria-label": `${colorLabel(color)} ${size} for ${person.name}: ${got} of ${value} claimed. Tap to change.`,
+        text: value === 1 ? (got ? "CLAIMED" : "NOT CLAIMED") : `${got}/${value} CLAIMED`
+      }));
+    }
   } else {
-    cell.append(h("span", { class: "qty-figure", text: value ? String(value) : "" }));
+    cell.append(h("span", { class: "qty-figure" },
+      h("span", { class: "qty-num", text: value ? String(value) : "" }),
+      value ? h("span", { class: "claim-mark", "aria-hidden": "true",
+        text: state === "all" ? "✓" : state === "part" ? `✓${got}` : "✗" }) : null));
   }
   return cell;
 }
 
 /* Extra phone detail only: main's caret still controls the expanded grid. */
-function summaryCell(grid) {
+function summaryCell(grid, person, editing) {
   const wrap = h("div", { class: "sum-wrap" });
   Tally.COLORS.forEach((color) => {
     Tally.SIZES.forEach((size) => {
       const qty = grid[color][size];
-      if (qty) wrap.append(h("span", { class: `sum-chip is-${color}` },
+      if (!qty) return;
+      const got = claimedQty(person, color, size);
+      const state = got >= qty ? "all" : got ? "part" : "none";
+      const label = `${colorLabel(color)} ${size} for ${person.name}: ${got} of ${qty} claimed`;
+      const props = editing
+        ? { type: "button", class: `sum-chip is-${color} claim-${state} is-tappable`, "data-action": "claim",
+          "data-claim": cellKey(color, size), "aria-label": `${label}. Tap to change.` }
+        : { class: `sum-chip is-${color} claim-${state}`, "aria-label": label };
+      wrap.append(h(editing ? "button" : "span", props,
         h("span", { class: "sum-color", text: colorLabel(color) }),
         h("span", { class: "sum-size", text: size }),
-        h("span", { class: "sum-qty", text: "\u00d7" + qty })));
+        h("span", { class: "sum-qty", text: "\u00d7" + qty }),
+        h("span", { class: "claim-mark", text: state === "all" ? "✓" : state === "part" ? `✓${got}` : "✗" })));
     });
   });
   if (!wrap.childNodes.length) wrap.append(h("span", { class: "sum-empty", text: "no shirts yet" }));
@@ -664,7 +760,7 @@ function renderRow(person) {
   const grid = Tally.personGrid(person);
   const row = h("tr", {
     "data-id": person.id,
-    class: `${person.paid ? "is-paid" : "is-unpaid"}${editing ? " is-editing" : ""}${expandedIds.has(person.id) ? " is-open" : ""}${person.id === highlightId ? " is-new" : ""}`
+    class: `${person.paid ? "is-paid" : "is-unpaid"} claim-${claimState(person)}${editing ? " is-editing" : ""}${expandedIds.has(person.id) ? " is-open" : ""}${person.id === highlightId ? " is-new" : ""}`
   });
 
   const nameCell = h("th", { scope: "row", class: "col-name", "data-label": "NAME" });
@@ -699,7 +795,7 @@ function renderRow(person) {
   nameCell.append(nameWrap);
   /* The name is the first column, so it has to be in the row before the grid. */
   row.append(nameCell);
-  row.append(summaryCell(grid));
+  row.append(summaryCell(grid, person, editing));
 
   Tally.COLORS.forEach((color) => {
     Tally.SIZES.forEach((size) => row.append(qtyCell(person, color, size, grid[color][size], editing)));
@@ -880,6 +976,17 @@ function renderSummary(summary) {
   document.getElementById("sum-people").textContent = Tally.peopleLabel(summary.count);
   document.getElementById("sum-paid-count").textContent = `${summary.paidCount} paid`;
   document.getElementById("sum-unpaid-count").textContent = `${summary.unpaidCount} unpaid`;
+  const claims = people.reduce((acc, person) => {
+    const t = claimTotals(person);
+    acc.claimed += t.claimed;
+    acc.total += t.total;
+    if (t.waiting.length) acc.people += 1;
+    return acc;
+  }, { claimed: 0, total: 0, people: 0 });
+  document.getElementById("sum-claimed").textContent = String(claims.claimed);
+  document.getElementById("sum-claimed-note").textContent = claims.total
+    ? `${claims.total - claims.claimed} waiting · ${Tally.peopleLabel(claims.people)} still to claim`
+    : "handed over so far";
   document.getElementById("updated-at").textContent = isFiltered()
     ? "This total is the full list, not just the rows shown above."
     : people.length
@@ -892,6 +999,7 @@ function renderSummary(summary) {
   const empty = people.length === 0;
   document.getElementById("copy-summary").disabled = empty;
   document.getElementById("copy-unpaid").disabled = empty;
+  document.getElementById("copy-unclaimed").disabled = empty;
   document.getElementById("export-csv").disabled = empty;
   document.getElementById("backup-btn").disabled = empty;
   document.getElementById("clear-btn").disabled = empty;
@@ -968,8 +1076,85 @@ function showOpenFile() {
   const when = document.getElementById("open-file-when");
   const title = document.getElementById("step3-title");
   if (name) name.textContent = DOC.name;
-  if (when) when.textContent = `Last modified ${Store.formatDate(DOC.updatedAt)}`;
+  if (when) {
+    when.textContent = DOC.updatedBy
+      ? `Last modified by ${DOC.updatedBy} · ${Store.formatDate(DOC.updatedAt)}`
+      : `Last modified ${Store.formatDate(DOC.updatedAt)}`;
+  }
   if (title) title.textContent = DOC.name;
+  const picker = document.getElementById("list-picker");
+  if (picker && !picker.querySelector(`option[value="${CSS.escape(DOC.id)}"]`)) {
+    picker.append(h("option", { value: DOC.id, selected: true, text: DOC.name }));
+  }
+}
+
+/* ---------- SAVE LIST AS ---------- */
+
+/* Shared mode: every list in the database, so people can switch between them. */
+async function renderListPicker() {
+  const picker = document.getElementById("list-picker");
+  if (!picker || !SHARED || typeof SharedStore.listAll !== "function") return;
+  let lists = [];
+  try { lists = await SharedStore.listAll(); } catch (error) { lists = []; }
+  if (!lists.some((item) => item.id === DOC.id)) lists.unshift({ id: DOC.id, name: DOC.name });
+  picker.replaceChildren(...lists.map((item) => h("option", {
+    value: item.id,
+    selected: item.id === DOC.id,
+    text: item.name + (item.updatedBy ? ` — ${item.updatedBy}` : "")
+  })));
+  picker.disabled = lists.length < 2;
+}
+
+function listUrl(id) {
+  return SHARED
+    ? `index.html?list=${encodeURIComponent(id)}`
+    : `index.html?doc=${encodeURIComponent(id)}`;
+}
+
+function openSaveAs() {
+  const form = document.getElementById("save-as-form");
+  const field = document.getElementById("save-as-name");
+  form.hidden = false;
+  document.getElementById("save-as-btn").hidden = true;
+  field.value = DOC && DOC.name && DOC.name !== "Shared list" ? `${DOC.name} copy` : "";
+  setFormError("save-as-error", "");
+  field.focus();
+  field.select();
+}
+
+function closeSaveAs() {
+  document.getElementById("save-as-form").hidden = true;
+  document.getElementById("save-as-btn").hidden = false;
+  setFormError("save-as-error", "");
+}
+
+async function submitSaveAs(event) {
+  event.preventDefault();
+  const field = document.getElementById("save-as-name");
+  const button = document.getElementById("save-as-go");
+  const name = String(field.value || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  if (!name) { setFormError("save-as-error", "Give the new list a name."); field.focus(); return; }
+  flushPendingSave();
+  const copy = JSON.parse(JSON.stringify(people));
+  button.disabled = true;
+  button.textContent = "Saving…";
+  let id = "";
+  if (SHARED) {
+    id = typeof SharedStore.create === "function" ? await SharedStore.create(name, copy, ME) : "";
+  } else {
+    const made = Store.createDoc(name, ME);
+    if (made.ok && Store.updateDoc(made.doc.id, copy, ME)) id = made.doc.id;
+    else setFormError("save-as-error", made.error || "Could not save on this device.");
+  }
+  button.disabled = false;
+  button.textContent = "SAVE";
+  if (!id) {
+    if (SHARED) setFormError("save-as-error", "Could not save to the shared database. Check your connection and try again.");
+    return;
+  }
+  showToast(`Saved as ${name}. Opening it now…`);
+  announce(`List saved as ${name}.`);
+  window.location.assign(listUrl(id));
 }
 
 function render(options = {}) {
@@ -987,6 +1172,26 @@ function render(options = {}) {
 }
 
 /* ---------- row actions ---------- */
+
+/* Each tap hands over one more shirt of that cell; past the last it resets. */
+function cycleClaim(id, key) {
+  const person = findPerson(id);
+  if (!person || !key) return;
+  const [color, size] = key.split("|");
+  const qty = Tally.cellQty(person.items, color, size);
+  if (!qty) return;
+  const current = claimedQty(person, color, size);
+  const next = current >= qty ? 0 : current + 1;
+  const claimed = Object.assign({}, person.claimed || {});
+  if (next) claimed[key] = next; else delete claimed[key];
+  person.claimed = normalizeClaims(claimed, person.items);
+  savePeople();
+  render();
+  const again = tbody.querySelector(`tr[data-id="${id}"] [data-action="claim"][data-claim="${key}"]`);
+  if (again) again.focus();
+  const t = claimTotals(person);
+  announce(`${person.name}: ${colorLabel(color)} ${size} ${next} of ${qty} claimed. ${t.claimed} of ${t.total} shirts claimed in total.`);
+}
 
 function togglePaid(id) {
   const person = findPerson(id);
@@ -1056,6 +1261,7 @@ function onRowChange(event) {
   if (data.cellInput) {
     const [color, size] = data.cellInput.split("|");
     person.items = Tally.setCellQty(person.items, color, size, el.value);
+    person.claimed = normalizeClaims(person.claimed, person.items);
     savePeople();
     render();
     const before = Tally.personShirts(person);
@@ -1158,7 +1364,7 @@ function sizeHeaders() {
 
 function buildCsv() {
   const summary = Tally.summarize(people);
-  const header = ["#", "Name", ...sizeHeaders(), "Shirts", "Price", "Status"];
+  const header = ["#", "Name", ...sizeHeaders(), "Shirts", "Price", "Status", "Claimed"];
 
   const rows = people.map((person, index) => {
     const grid = Tally.personGrid(person);
@@ -1168,7 +1374,8 @@ function buildCsv() {
       ...Tally.COLORS.flatMap((color) => Tally.SIZES.map((size) => grid[color][size])),
       Tally.personShirts(person),
       Tally.personPrice(person),
-      person.paid ? "Paid" : "Unpaid"
+      person.paid ? "Paid" : "Unpaid",
+      describeClaims(person)
     ];
   });
 
@@ -1253,6 +1460,16 @@ function unpaidText() {
   ].join("\n");
 }
 
+function unclaimedText() {
+  const waiting = people.filter((person) => claimTotals(person).waiting.length);
+  if (!waiting.length) return "TEAM ELITE PH TSHIRT\nEvery shirt has been claimed.";
+  return [
+    "NOT YET CLAIMED — TEAM ELITE PH TSHIRT",
+    ...waiting.map((person, index) => `${index + 1}. ${person.name} — waiting: ${claimTotals(person).waiting.map((w) => `${w.color} ${w.size} ×${w.qty - w.claimed}`).join(", ")}${person.paid ? "" : " — UNPAID"}`),
+    `${waiting.length} ${waiting.length === 1 ? "person" : "people"} still to claim`
+  ].join("\n");
+}
+
 function parseBackup(text) {
   let data;
   try {
@@ -1273,7 +1490,7 @@ function parseBackup(text) {
   let skipped = 0;
   arr.forEach((item) => {
     const legacy = item && item.size != null && item.color != null && !item.items && !item.white && !item.blue;
-    const person = legacy ? Tally.migrateLegacyOrder(item, uid) : Tally.normalizePerson(item, uid);
+    const person = legacy ? Tally.migrateLegacyOrder(item, uid) : withClaims(Tally.normalizePerson(item, uid), item);
     if (person) restored.push(person);
     else skipped += 1;
   });
@@ -1357,7 +1574,7 @@ function sharedBusy() {
   return false;
 }
 
-function applySharedRemote(remotePeople) {
+function applySharedRemote(remotePeople, updatedAt, info) {
   const before = JSON.stringify(people);
   const { restored } = restorePeople(remotePeople);
   if (JSON.stringify(restored) === before) return;
@@ -1365,10 +1582,15 @@ function applySharedRemote(remotePeople) {
   people = restored;
   highlightId = null;
   editingId = null;
+  if (updatedAt) DOC.updatedAt = updatedAt;
+  if (info) {
+    if (info.updatedBy !== undefined) DOC.updatedBy = info.updatedBy;
+    if (info.name) DOC.name = info.name;
+  }
   render();
   const state = document.getElementById("save-state");
   state.classList.remove("is-error");
-  state.textContent = `Shared list updated by someone else · ${stamp()}`;
+  state.textContent = `Shared list updated by ${DOC.updatedBy || "someone else"} · ${stamp()}`;
   announce("The shared list just changed and was refreshed.");
 }
 
@@ -1381,7 +1603,10 @@ async function loadSharedList() {
     const { restored, skipped } = restorePeople(data.people);
     people = restored;
     DOC.updatedAt = data.updatedAt || Date.now();
+    if (data.updatedBy !== undefined) DOC.updatedBy = data.updatedBy;
+    if (data.name) DOC.name = data.name;
     render();
+    renderListPicker();
     state.textContent = "Connected to the shared list — everyone on this site sees the same names.";
     if (skipped) showToast("Some saved rows were skipped because they were incomplete.");
     SharedStore.startPoll(applySharedRemote);
@@ -1418,6 +1643,7 @@ function bind() {
     if (button.dataset.action === "toggle") togglePaid(id);
     if (button.dataset.action === "edit") toggleEdit(id);
     if (button.dataset.action === "remove") removePerson(id);
+    if (button.dataset.action === "claim") cycleClaim(id, button.dataset.claim);
     if (button.dataset.action === "expand") toggleExpand(id);
   });
 
@@ -1486,6 +1712,18 @@ function bind() {
     const ok = await copyText(summaryText());
     showToast(ok ? "Summary copied." : "Could not copy. Use Export CSV instead.");
   });
+  document.getElementById("save-as-btn").addEventListener("click", openSaveAs);
+  document.getElementById("save-as-cancel").addEventListener("click", closeSaveAs);
+  document.getElementById("save-as-form").addEventListener("submit", submitSaveAs);
+  document.getElementById("save-as-name").addEventListener("input", () => setFormError("save-as-error", ""));
+  document.getElementById("list-picker").addEventListener("change", (event) => {
+    const id = event.target.value;
+    if (id && id !== DOC.id) { flushPendingSave(); window.location.assign(listUrl(id)); }
+  });
+  document.getElementById("copy-unclaimed").addEventListener("click", async () => {
+    const ok = await copyText(unclaimedText());
+    showToast(ok ? "Unclaimed list copied." : "Could not copy. Use Export CSV instead.");
+  });
   document.getElementById("copy-unpaid").addEventListener("click", async () => {
     const ok = await copyText(unpaidText());
     showToast(ok ? "Unpaid list copied." : "Could not copy. Use Export CSV instead.");
@@ -1546,7 +1784,22 @@ function bind() {
   }
 }
 
+/* Who is signed in, and a way out. Sign-out flushes pending saves first. */
+function bindSession() {
+  const who = document.getElementById("signed-in-as");
+  const button = document.getElementById("signout-btn");
+  const me = window.Store && Store.session();
+  if (who && me) who.textContent = `Signed in as ${me.name}`;
+  if (!button) return;
+  button.addEventListener("click", () => {
+    if (typeof window.flushPendingSaves === "function") window.flushPendingSaves();
+    if (!Store.signOut()) { showToast("Could not sign out. Check your browser storage and try again."); return; }
+    window.location.replace("login.html");
+  });
+}
+
 function init() {
+  bindSession();
   if (!Tally) {
     setFormError("form-error", "The price list did not load. Refresh the page.");
     return;
@@ -1557,6 +1810,8 @@ function init() {
   buildHead();
   if (SHARED) {
     document.body.classList.add("shared-mode");
+    const name = document.getElementById("open-file-name");
+    if (name) name.textContent = "Shared list";
     people = [];
     bind();
     render();

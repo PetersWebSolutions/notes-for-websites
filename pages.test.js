@@ -23,15 +23,22 @@ test('inline guard: missing Store, missing session, missing/unknown doc, and val
   guard(window, fake);
   assert.deepEqual(seen, []);
 });
-test('inline guard: shared mode is open to everyone, with or without a session', () => {
+test('inline guard: shared mode needs a session and a ?list, else goes to the lists page', () => {
   const source = read('index.html').match(/\(function \(\) \{[\s\S]*?\}\)\(\);/)[0];
   const guard = new Function('window', 'Store', source);
   const seen=[];
-  const window={location:{replace:u=>seen.push(u)},SharedStore:{enabled:()=>true}};
-  guard(window, undefined);
-  assert.deepEqual(seen, []);
-  guard({...window,SharedStore:{enabled:()=>false}}, {session:()=>null});
-  assert.deepEqual(seen, ['login.html']);
+  const signedIn={session:()=>({id:'x',name:'Joyce'}), currentDocId:()=>'', doc:()=>null};
+  const window={location:{replace:u=>seen.push(u),search:'?list=batch-2'},SharedStore:{enabled:()=>true}};
+  guard({...window,Store:undefined}, undefined);
+  assert.deepEqual(seen.splice(0), ['login.html']);
+  guard({...window,Store:signedIn}, {...signedIn,session:()=>null});
+  assert.deepEqual(seen.splice(0), ['login.html']);
+  guard({...window,Store:signedIn}, signedIn);
+  assert.deepEqual(seen.splice(0), []);
+  guard({...window,location:{replace:u=>seen.push(u),search:''},Store:signedIn}, signedIn);
+  assert.deepEqual(seen.splice(0), ['lists.html']);
+  guard({...window,Store:signedIn,SharedStore:{enabled:()=>false}}, signedIn);
+  assert.deepEqual(seen, ['lists.html']);
 });
 test('login focus, wrong passcode, input clears error, and successful persistent session', t => {
   const b=page(t, 'login.html');
@@ -45,14 +52,14 @@ test('login focus, wrong passcode, input clears error, and successful persistent
   submit(b,'#login-form');
   assert.equal(b.S.session().name,'Joyce');
 });
-test('signup rejects duplicates, clears error and immediately signs in normalized name', t => {
-  const b=page(t,'login.html');
-  input(b,'#new-name','joyce'); input(b,'#new-pass','secret'); submit(b,'#signup-form');
-  assert.equal(b.q('#signup-error').hidden,false);
-  input(b,'#new-name','  Cara   Lim ');
-  assert.equal(b.q('#signup-error').hidden,true);
-  submit(b,'#signup-form');
-  assert.equal(b.S.session().name,'Cara Lim');
+test('the three fixed team accounts all sign in with the shared passcode; no self sign-up on the page', t => {
+  for (const name of ['Joyce','Stuts','Gen','stuts']) {
+    const b=page(t,'login.html');
+    assert.equal(b.q('#signup-form'),null);
+    input(b,'#login-name',name); input(b,'#login-pass',pass); submit(b,'#login-form');
+    assert.equal(b.S.session().name, name[0].toUpperCase()+name.slice(1));
+    assert.equal(b.S.checkLogin(name,'wrong'),null);
+  }
 });
 test('login storage denial displays error rather than redirecting in a loop', t => {
   const b=page(t,'login.html');
@@ -116,7 +123,7 @@ test('add another person, list accounts, and sign out without deleting files', t
   const b=page(t,'lists.html',profile());
   assert.match(b.q('#people-here').textContent,/Joyce/);
   input(b,'#person-name','Ben'); input(b,'#person-pass','secret'); submit(b,'#add-person-form');
-  assert.match(b.q('#people-here').textContent,/Joyce, Ben/);
+  assert.match(b.q('#people-here').textContent,/Joyce, Stuts, Gen, Ben/);
   assert.equal(b.q('#person-name').value,''); assert.equal(b.q('#person-pass').value,'');
   assert.equal(b.S.session().name,'Joyce');
   b.q('#signout-btn').click();
@@ -148,7 +155,7 @@ test('18 visible grid columns; body, footer and colgroup include 19 with hidden 
 });
 test('summary chips ordered white then blue by size, and empty summary', t => {
   const b=tally(t,[{...documentA,people:[ana,{...ana,id:'empty',items:[]}]}]);
-  assert.deepEqual(b.qa('#order-body tr:first-child .sum-chip').map(n=>n.textContent),['WhiteM×2','Blue2XL×1']);
+  assert.deepEqual(b.qa('#order-body tr:first-child .sum-chip').map(n=>n.textContent),['WhiteM×2✗','Blue2XL×1✗']);
   assert.equal(b.q('.sum-empty').textContent,'no shirts yet');
 });
 test('caret toggles row in place and remains expanded after redraw', t => {
@@ -265,7 +272,7 @@ test('oldest one-shirt-per-row backups keep their shirts when the file opens', t
   assert.equal(b.q('.name-text').textContent,'Oldest Row');
   assert.equal(b.q('#sum-shirts').textContent,'1');
   assert.equal(b.q('#sum-paid').textContent,'₱449');
-  assert.equal(b.q('#order-body .sz-blue[data-label="3XL"] .qty-figure').textContent,'1');
+  assert.equal(b.q('#order-body .sz-blue[data-label="3XL"] .qty-figure .qty-num').textContent,'1');
 });
 test('UPDATE LIST force-writes the in-memory people and confirms, then reverts', async t => {
   const b=tally(t);
@@ -335,4 +342,79 @@ test('refresh preserves data: visibilitychange, pagehide and sign-out flush a pe
   const c=page(t,'index.html',snapshot(b.w),'https://example.test/index.html?doc=a');
   assert.equal(c.q('.name-text').textContent,'Signed Out Edit');
   assert.equal(c.S.session().name,'Joyce');
+});
+test('claimed shirts: red until claimed, edited only in EDIT, filters, persistence', t => {
+  const b=tally(t);
+  const row=()=>b.q('#order-body tr[data-id="ana"]');
+  // read mode: nothing claimed yet -> red ✗ on every cell and chip, red note, no tappable control
+  assert.ok(row().classList.contains('claim-none'));
+  assert.equal(row().querySelector('[data-cell="white|M"]').className.includes('claim-none'),true);
+  assert.equal(row().querySelector('[data-cell="white|M"] .claim-mark').textContent,'✗');
+  assert.equal(row().querySelector('.sum-chip.claim-none .claim-mark').textContent,'✗');
+  assert.equal(row().querySelector('.claim-note'),null);
+  assert.equal(row().querySelector('[data-action="claim"]'),null);
+  // EDIT shows CLAIMED / NOT CLAIMED under each ordered size
+  row().querySelector('[data-action="edit"]').click();
+  const toggle=()=>row().querySelector('.claim-toggle[data-claim="white|M"]');
+  assert.equal(toggle().textContent,'0/2 CLAIMED');
+  assert.equal(row().querySelector('.claim-toggle[data-claim="blue|2XL"]').textContent,'NOT CLAIMED');
+  toggle().click();
+  assert.equal(toggle().textContent,'1/2 CLAIMED');
+  assert.ok(row().classList.contains('claim-part'));
+  assert.equal(row().querySelector('[data-cell="white|M"] .claim-mark'),null);
+  toggle().click();
+  assert.equal(toggle().textContent,'2/2 CLAIMED');
+  row().querySelector('.sum-chip[data-claim="blue|2XL"]').click(); // chips are tappable while editing
+  assert.equal(row().querySelector('.claim-toggle[data-claim="blue|2XL"]').textContent,'CLAIMED');
+  assert.ok(row().classList.contains('claim-all'));
+  row().querySelector('[data-action="edit"]').click(); // DONE
+  assert.equal(row().querySelector('[data-action="claim"]'),null);
+  assert.equal(row().querySelector('[data-cell="white|M"] .claim-mark').textContent,'✓');
+  assert.equal(b.q('#sum-claimed').textContent,'3');
+  const saved=JSON.parse(b.w.localStorage.getItem(KEYS.docs))[0].people.find(p=>p.id==='ana');
+  assert.deepEqual(saved.claimed,{'white|M':2,'blue|2XL':1});
+  // filters
+  b.q('[data-filter="claimed"]').click();
+  assert.deepEqual(b.qa('#order-body tr').map(r=>r.dataset.id),['ana']);
+  b.q('[data-filter="unclaimed"]').click();
+  assert.deepEqual(b.qa('#order-body tr').map(r=>r.dataset.id),['ben']);
+  b.q('[data-filter="all"]').click();
+  // tapping past the last resets that cell (still only in EDIT)
+  row().querySelector('[data-action="edit"]').click();
+  toggle().click();
+  assert.equal(toggle().textContent,'0/2 CLAIMED');
+  assert.ok(row().classList.contains('claim-part'));
+  // one shirt claimed and one waiting: Ana is on BOTH the Claimed and the Unclaimed list
+  b.q('[data-filter="claimed"]').click();
+  assert.deepEqual(b.qa('#order-body tr').map(r=>r.dataset.id),['ana']);
+  b.q('[data-filter="unclaimed"]').click();
+  assert.deepEqual(b.qa('#order-body tr').map(r=>r.dataset.id),['ana','ben']);
+  b.q('[data-filter="all"]').click();
+  // a reload keeps the claims; a reduced quantity clamps them
+  const c=tally(t,JSON.parse(b.w.localStorage.getItem(KEYS.docs)));
+  assert.equal(c.q('#order-body tr[data-id="ana"] .claim-toggle'),null);
+  assert.ok(c.q('#order-body tr[data-id="ana"]').classList.contains('claim-part'));
+  const d=tally(t,[{...documentA,people:[{...ana,items:[{color:'white',size:'M',qty:1}],claimed:{'white|M':5,'blue|L':1}}]}]);
+  assert.ok(d.q('#order-body tr').classList.contains('claim-all'));
+  assert.equal(d.q('#order-body tr [data-cell="white|M"] .claim-mark').textContent,'✓');
+  assert.equal(d.q('#copy-unclaimed').disabled,false);
+});
+
+test('device mode: saves stamp "last modified by" and SAVE LIST AS copies the names into a new file', t => {
+  const b=tally(t);
+  assert.match(b.q('#open-file-when').textContent,/^Last modified [A-Z]/);
+  b.q('[data-action="toggle"]').click();
+  assert.match(b.q('#open-file-when').textContent,/^Last modified by Joyce · /);
+  assert.equal(JSON.parse(b.w.localStorage.getItem(KEYS.docs))[0].updatedBy,'Joyce');
+  b.q('#save-as-btn').click();
+  assert.equal(b.q('#save-as-name').value,'Joyce listing copy');
+  input(b,'#save-as-name','Batch 2');
+  submit(b,'#save-as-form');
+  const docs=JSON.parse(b.w.localStorage.getItem(KEYS.docs));
+  assert.equal(docs.length,3);
+  assert.equal(docs[0].name,'Batch 2');
+  assert.equal(docs[0].updatedBy,'Joyce');
+  assert.deepEqual(docs[0].people.map(p=>p.name),['Ana Reyes','Ben Cruz']);
+  assert.equal(docs[0].owner,'Joyce');
+  assert.match(b.q('#toast').textContent,/Saved as Batch 2/);
 });

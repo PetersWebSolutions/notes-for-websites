@@ -4,9 +4,14 @@ const assert = require('node:assert/strict');
 const { boot, snapshot, KEYS, pass, ana, profile } = require('./tests/dom.cjs');
 function model(t, store = {}, url) { const b = boot('login.html', store, url, ['store.js']); t.after(b.close); return b; }
 
-test('seeds the pre-hashed first account and signs in case-insensitively', t => {
+test('seeds the three pre-hashed team accounts, repairs a changed passcode, and signs in case-insensitively', t => {
   const { S } = model(t);
-  assert.equal(S.users().length, 1);
+  assert.equal(S.users().length, 3);
+  assert.equal(S.users().map(u => u.name).join(','), 'Joyce,Stuts,Gen');
+  assert.equal(S.checkLogin('gen', pass).name, 'Gen');
+  const { w } = model(t, { [KEYS.users]: JSON.stringify([{ id: 'k', name: 'Stuts', pass: 'changed', createdAt: 1 }]) });
+  assert.equal(w.Store.users().length, 3);
+  assert.equal(w.Store.checkLogin('Stuts', pass).id, 'k');
   assert.equal(S.users()[0].pass, '17vlux81jd9ixt');
   assert.equal(S.hash(pass), '17vlux81jd9ixt');
   assert.equal(S.checkLogin('  jOyCe ', pass).name, 'Joyce');
@@ -44,7 +49,7 @@ test('session persists across a new window and sign-out only removes the session
   assert.equal(c.S.signOut(), true);
   assert.equal(c.S.session(), null);
   assert.equal(c.S.docs().length, 1);
-  assert.equal(c.S.users().length, 1);
+  assert.equal(c.S.users().length, 3);
 });
 test('legacy people migrate once without consuming the original key', t => {
   const legacy = JSON.stringify([ana]);

@@ -8,7 +8,7 @@ Open `login.html` in a browser, or serve the folder. There is no build step, fra
 
 The three pages, in order:
 
-1. **Sign in** (`login.html`). The first account is **Joyce**, with the passcode agreed when the site was set up. Anyone can expand **First time on this device?** to add their own account.
+1. **Sign in** (`login.html`). Three fixed team accounts exist on every device: **Joyce**, **Stuts** and **Gen**, all with the team passcode. Every page requires a sign-in first; sign-in leads to the lists page, and picking a list opens the tally. There is no self sign-up on the sign-in page; extra people can still be added from the Files page.
 2. **Saved files** (`lists.html`). Give a file a name, press **NEW FILE**, then **OPEN**. You can rename or delete files, add another person to this device, or sign out here. Up to 200 files are kept, sorted by last modification, with people/shirt counts and timestamps.
 3. **Tally** (`index.html?doc=…`). The bar at the top names the open file and links back to **All files**. Every save, edit, restore, and clear applies only to this file. JSON backups include its name.
 
@@ -95,9 +95,21 @@ The list is stored as one person per row, where each person holds a list of item
     { "color": "blue", "size": "4XL", "qty": 1 }
   ],
   "paid": false,
+  "claimed": { "white|M": 1 },
   "createdAt": 0
 }
 ```
+
+`claimed` counts how many shirts of each `color|size` cell the buyer has
+already taken (a buyer may collect one shirt now and wait for a size that is
+out of stock). Shirts not yet handed over show in red (✗), claimed ones in
+green (✓). Press **EDIT** on the row and tap **CLAIMED / NOT CLAIMED** under a
+size (or the chip on a phone) once per shirt handed over; tapping past the
+last one resets the cell. The **Claimed** and
+**Unclaimed** filters narrow the list (someone with one shirt claimed and one
+waiting appears in both), **Copy unclaimed** copies the waiting
+list, and the CSV export carries a **Claimed** column. Counts are clamped to
+the ordered quantity whenever a row is edited or loaded.
 
 The existing single list (`team-elite-ph-tshirt-people-v2`) becomes **Main list** on the first visit to Saved files. Its original storage key is left untouched as a fallback, even after edits or deletion of the migrated file. Older person shapes are normalized when that file is opened: the old white size, blue size, and extra 3XL/4XL columns become items. The old extra columns carried no color, so they are read as **white**. Anything saved from here on uses the shape above, and a **Backup** from an earlier version still restores.
 
@@ -123,9 +135,21 @@ requests the shared row exactly the way the browser does. A paused project, a
 rotated key or a dropped policy shows up as a red run instead of a silently
 device-local site. It can also be started by hand from the Actions tab.
 
-That is all. With a URL configured, `index.html` opens straight to the shared
-list for every visitor — no sign-in — and every save, UPDATE LIST, toggle and
-clear writes to Supabase. Pages poll every five seconds and refresh when
+4. Also run
+   [`supabase/migrations/0002_list_names_and_editor.sql`](supabase/migrations/0002_list_names_and_editor.sql).
+   It adds `name` and `updated_by` columns, which power **SAVE LIST AS** and
+   the **Last modified by Joyce · date** line. The site still works before it
+   runs (saves fall back to the original columns, without a name or editor).
+
+With a URL configured, sign-in leads to `lists.html`, which shows every list
+saved online with who last modified it and when. **OPEN** loads that list in
+the tally (`index.html?list=<id>`); **NEW LIST** starts an empty one; Rename
+and Delete work online too (Delete needs the policy from migration 0002).
+Every save, UPDATE LIST, toggle and clear writes to Supabase stamped with the
+signed-in name. **SAVE LIST AS** (beside UPDATE LIST) copies the names on
+screen into a new list under the name you give it, which then appears on the
+lists page for everyone; the **Open list** menu in the top bar switches
+between lists without going back. Pages poll every five seconds and refresh when
 someone else changes the list (never mid-edit, so no keystroke is dropped).
 Closing the tab flushes the pending save via `sendBeacon`.
 
