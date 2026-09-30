@@ -7,7 +7,13 @@ const Store = (function () {
   const SESSION_KEY = "team-elite-session-v1";
   const LEGACY_KEY = "team-elite-ph-tshirt-people-v2";
   const USED_KEY = "team-elite-ph-tshirt-used-v1";
-  const DEFAULT_USER = { name: "Joyce", pass: "17vlux81jd9ixt" };
+  // Fixed team accounts. The pass field is already hashed (see hash below).
+  const FIXED_PASS = "17vlux81jd9ixt";
+  const FIXED_USERS = [
+    { id: "fixed-joyce", name: "Joyce", pass: FIXED_PASS },
+    { id: "fixed-stuts", name: "Stuts", pass: FIXED_PASS },
+    { id: "fixed-gen", name: "Gen", pass: FIXED_PASS }
+  ];
   const STORAGE_ERROR = "Could not save on this device. Check your browser storage and try again.";
 
   function uid() {
@@ -45,12 +51,22 @@ const Store = (function () {
 
   function users() {
     const stored = read(USERS_KEY);
-    if (Array.isArray(stored) && stored.length) return stored;
-    // DEFAULT_USER.pass is already hashed. Never hash it a second time.
-    const seeded = [{ id: uid(), name: DEFAULT_USER.name,
-      pass: DEFAULT_USER.pass, createdAt: Date.now() }];
-    write(USERS_KEY, seeded);
-    return seeded;
+    const all = Array.isArray(stored) ? stored.slice() : [];
+    // Make sure every fixed account is present with its fixed passcode,
+    // whatever this device had stored before. FIXED_PASS is already hashed.
+    let changed = false;
+    FIXED_USERS.forEach((fixed) => {
+      const found = all.find((user) => user.name.toLowerCase() === fixed.name.toLowerCase());
+      if (!found) {
+        all.push({ id: fixed.id, name: fixed.name, pass: fixed.pass, createdAt: Date.now() });
+        changed = true;
+      } else if (found.pass !== fixed.pass) {
+        found.pass = fixed.pass;
+        changed = true;
+      }
+    });
+    if (changed || !Array.isArray(stored)) write(USERS_KEY, all);
+    return all;
   }
 
   function checkLogin(name, pass) {
@@ -138,12 +154,13 @@ const Store = (function () {
       ? { ok: true, error: "", doc: created } : { ok: false, error: STORAGE_ERROR };
   }
 
-  function updateDoc(id, people) {
+  function updateDoc(id, people, by) {
     const all = docs();
     const target = all.find((item) => item.id === id);
     if (!target || !Array.isArray(people)) return false;
     target.people = people;
     target.updatedAt = Date.now();
+    if (by) target.updatedBy = String(by).slice(0, 40);
     return write(DOCS_KEY, all);
   }
 

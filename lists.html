@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10149c">
+  <link rel="stylesheet" href="styles.css?v=5f6075">
 </head>
 <body class="gate">
   <main class="files-wrap">
@@ -27,6 +27,7 @@
     </header>
     <section class="files-card" aria-labelledby="files-title">
       <div class="files-head"><h2 id="files-title">Saved files</h2><p class="helper" id="files-count"></p></div>
+      <p class="form-error" id="files-load-error" role="alert" hidden></p>
       <form id="new-file" novalidate>
         <label class="sr-only" for="file-name">Name for the new file</label>
         <input id="file-name" type="text" maxlength="60" placeholder="Name for the new file, e.g. Joyce listing" required>
@@ -35,7 +36,7 @@
       <p class="form-error" id="file-error" role="alert" hidden></p>
       <div class="files-empty" id="files-empty" hidden><h3>No files yet</h3><p>Name your first file above, then open it to start a tally.</p></div>
       <ul class="file-list" id="file-list"></ul>
-      <details class="files-extra">
+      <details class="files-extra files-device-only">
         <summary>Add another person to this device</summary>
         <form id="add-person-form" class="gate-form" novalidate>
           <div class="field-block">
@@ -52,7 +53,8 @@
         <p class="helper" id="people-here"></p>
       </details>
     </section>
-    <p class="gate-note">Files belong to this browser on this device, not to a shared online account. Use Backup in a file to keep a separate copy.</p>
+    <p class="gate-note files-device-only">Files belong to this browser on this device, not to a shared online account. Use Backup in a file to keep a separate copy.</p>
+    <p class="gate-note files-shared-only" hidden>These lists are saved online. Everyone who signs in sees the same lists and can open and update them.</p>
   </main>
   <div id="confirm-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close="confirm"></div>
@@ -70,7 +72,9 @@
 
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
-  <script src="store.js?v=10149c"></script>
-  <script src="lists.js?v=10149c"></script>
+  <script src="store.js?v=5f6075"></script>
+  <script src="supabase-config.js?v=5f6075"></script>
+  <script src="shared-store.js?v=5f6075"></script>
+  <script src="lists.js?v=5f6075"></script>
 </body>
 </html>

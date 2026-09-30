@@ -30,11 +30,16 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json'
 };
 
-function readRow() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (error) { return null; }
+/* All rows, keyed by id. An older single-row file is read as one row. */
+function readRows() {
+  try {
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    if (Array.isArray(data)) return data;
+    return data && data.id ? [data] : [];
+  } catch (error) { return []; }
 }
-function writeRow(row) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(row, null, 2));
+function writeRows(rows) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(rows, null, 2));
 }
 
 function configHasRealUrl() {
@@ -50,9 +55,12 @@ function demoConfig() {
 
 function handleSharedLists(req, res, url) {
   if (req.method === 'GET') {
-    const id = String(url.searchParams.get('id') || '').replace(/^eq\./, '');
-    const row = readRow();
-    const rows = row && row.id === id ? [row] : [];
+    const id = url.searchParams.has('id') ? String(url.searchParams.get('id')).replace(/^eq\./, '') : null;
+    let rows = readRows();
+    if (id !== null) rows = rows.filter((row) => row.id === id);
+    if (/updated_at\.desc/.test(url.searchParams.get('order') || '')) {
+      rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+    }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(rows));
     return;
@@ -67,14 +75,36 @@ function handleSharedLists(req, res, url) {
         res.end('{}');
         return;
       }
+      const rows = readRows();
+      const prior = rows.find((item) => item.id === String(incoming.id || 'main')) || {};
       const row = {
         id: String(incoming.id || 'main'),
         people: Array.isArray(incoming.people) ? incoming.people : [],
-        updated_at: incoming.updated_at || new Date().toISOString()
+        updated_at: incoming.updated_at || new Date().toISOString(),
+        name: incoming.name !== undefined ? incoming.name : (prior.name || null),
+        updated_by: incoming.updated_by !== undefined ? incoming.updated_by : (prior.updated_by || null)
       };
-      writeRow(row);
+      writeRows(rows.filter((item) => item.id !== row.id).concat([row]));
       res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify([row]));
+    });
+    return;
+  }
+  if (req.method === 'PATCH' || req.method === 'DELETE') {
+    const id = String(url.searchParams.get('id') || '').replace(/^eq\./, '');
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      const rows = readRows();
+      if (req.method === 'DELETE') {
+        writeRows(rows.filter((row) => row.id !== id));
+      } else {
+        let patch = {};
+        try { patch = JSON.parse(body || '{}'); } catch (error) { patch = {}; }
+        writeRows(rows.map((row) => (row.id === id ? Object.assign({}, row, patch) : row)));
+      }
+      res.writeHead(204);
+      res.end();
     });
     return;
   }

@@ -1151,7 +1151,8 @@ main { padding: 22px 0 8px; }
 .update-when.is-error { color: var(--danger); font-weight: 700; }
 
 /* Shared list mode: the list belongs to the site, not to device files. */
-body.shared-mode .back-link { display: none; }
+body.shared-mode .file-bar .back-link { display: inline; }
+body.shared-mode .files-device-only { display: none; }
 
 .summary-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
@@ -1181,7 +1182,7 @@ body.shared-mode .back-link { display: none; }
 
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1533,6 +1534,9 @@ body.modal-open { overflow: hidden; }
 .back-link:hover { text-decoration: underline; }
 .file-now { margin: 0; font-size: 13px; color: var(--navy); overflow-wrap: anywhere; min-width: 0; }
 .file-when { margin: 0 0 0 auto; font-size: 11px; color: var(--muted); }
+.file-who { margin: 0; font-size: 12px; color: var(--navy); font-weight: 600; }
+.file-when:empty { display: none; }
+.signout-btn { padding: 7px 12px; font-size: 12px; }
 
 /* A hidden extra cell preserves the original 18 visible desktop columns. */
 #order-cols .col-summary { display: none; width: 0; }
@@ -1871,11 +1875,65 @@ body.typing { --footer-space: 24px; }
     font-size: 9px;
   }
 
-  .stat-row { grid-template-columns: repeat(4, 1fr); }
+  .stat-row { grid-template-columns: repeat(5, 1fr); }
   .stat { background: #fff !important; color: var(--ink) !important; border: 1px solid var(--line) !important; }
   .stat strong { color: var(--ink) !important; font-size: 18px; }
 
   .matrix { min-width: 0; font-size: 10px; }
   .matrix thead th { background: #eef2f8; color: var(--navy); }
   .matrix .mx-price { color: var(--muted); }
+}
+
+/* ---------- claimed shirts ---------- */
+.qty-figure { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
+.claim-mark { font-size: 10px; font-weight: 800; line-height: 1; }
+td.cell-qty.claim-none { background: #fdecec !important; box-shadow: inset 0 0 0 1.5px #e03131; }
+td.cell-qty.claim-none .qty-num, td.cell-qty.claim-none .claim-mark { color: #c92a2a; }
+td.cell-qty.claim-part { background: #fff4e0 !important; box-shadow: inset 0 0 0 1.5px #f0b429; }
+td.cell-qty.claim-part .claim-mark { color: #9a5b00; }
+td.cell-qty.claim-all { background: var(--paid-bg) !important; box-shadow: inset 0 0 0 1.5px rgba(13, 122, 69, 0.45); }
+td.cell-qty.claim-all .qty-num, td.cell-qty.claim-all .claim-mark { color: var(--paid); }
+.claim-toggle {
+  margin-top: 3px;
+  padding: 3px 4px;
+  width: 100%;
+  border-radius: 6px;
+  border: 1.5px solid #e03131;
+  background: #fff;
+  color: #c92a2a;
+  font: inherit;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.claim-toggle.claim-part { border-color: #f0b429; color: #9a5b00; }
+.claim-toggle.claim-all { border-color: var(--paid); background: var(--paid); color: #fff; }
+.sum-chip .claim-mark { font-size: 10px; }
+.sum-chip.claim-none { background: #fdecec; border-color: #e03131; color: #c92a2a; }
+.sum-chip.claim-part { background: #fff4e0; border-color: #f0b429; color: #9a5b00; }
+.sum-chip.claim-all { background: var(--paid-bg); border-color: rgba(13, 122, 69, 0.45); color: var(--paid); }
+.sum-chip.is-tappable { cursor: pointer; font: inherit; font-size: 11px; box-shadow: 0 1px 0 rgba(0,0,0,0.08); }
+.stat.claimed { background: #f3f8ff; border-color: rgba(31, 81, 255, 0.18); }
+.stat.claimed strong { color: var(--blue-deep); }
+@media print {
+  .claim-mark { color: #000 !important; }
+  td.cell-qty.claim-none, td.cell-qty.claim-part, td.cell-qty.claim-all { background: #fff !important; box-shadow: none !important; }
+}
+
+/* ---------- SAVE LIST AS and the shared list picker ---------- */
+.update-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.save-as-btn { padding: 12px 18px; font-weight: 800; }
+.save-as-form { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); max-width: 560px; }
+.save-as-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.save-as-row input { flex: 1 1 200px; min-width: 0; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; }
+.save-as-form .helper { margin: 8px 0 0; }
+.list-picker-label { display: none; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+body.shared-mode .list-picker-label { display: inline-flex; }
+#list-picker { font: inherit; font-size: 12.5px; font-weight: 700; color: var(--navy); padding: 5px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; max-width: 220px; }
+#list-picker:disabled { opacity: 0.7; }
+@media (max-width: 800px) {
+  .update-row .save-as-btn { width: 100%; }
 }

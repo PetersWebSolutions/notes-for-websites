@@ -17,19 +17,23 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10149c">
-  <script src="store.js?v=10149c"></script>
-  <script src="supabase-config.js?v=10149c"></script>
-  <script src="shared-store.js?v=10149c"></script>
+  <link rel="stylesheet" href="styles.css?v=5f6075">
+  <script src="store.js?v=5f6075"></script>
+  <script src="supabase-config.js?v=5f6075"></script>
+  <script src="shared-store.js?v=5f6075"></script>
   <script>
     /*
-     * Shared mode (a Supabase connection is configured) is open to everyone.
-     * Device mode: sign in and pick a file before the page draws anything.
+     * Everyone signs in first, then picks a list on lists.html. Shared mode
+     * (a Supabase connection is configured) needs ?list=<id>; device mode
+     * needs ?doc=<id> naming a file that exists.
      */
     (function () {
-      if (window.SharedStore && window.SharedStore.enabled()) return;
       if (!window.Store || !Store.session()) {
         window.location.replace("login.html");
+        return;
+      }
+      if (window.SharedStore && window.SharedStore.enabled()) {
+        if (!/[?&]list=/.test(window.location.search || "")) window.location.replace("lists.html");
         return;
       }
       var id = Store.currentDocId();
@@ -40,9 +44,14 @@
 <body>
   <div class="file-bar no-print">
     <div class="wrap file-bar-inner">
-      <a class="back-link" href="lists.html">← All files</a>
+      <a class="back-link" href="lists.html">← All lists</a>
       <p class="file-now">File: <strong id="open-file-name">—</strong></p>
+      <label class="list-picker-label shared-only">Open list
+        <select id="list-picker" aria-label="Open another shared list"></select>
+      </label>
       <p class="file-when" id="open-file-when"></p>
+      <p class="file-who" id="signed-in-as"></p>
+      <button class="ghost-btn signout-btn" id="signout-btn" type="button">Sign out</button>
     </div>
   </div>
   <a class="skip" href="#orders">Skip to list</a>
@@ -189,6 +198,8 @@
           <button type="button" class="chip" data-filter="unpaid" aria-pressed="false">Unpaid</button>
           <button type="button" class="chip" data-filter="white" aria-pressed="false">White</button>
           <button type="button" class="chip" data-filter="blue" aria-pressed="false">Blue</button>
+          <button type="button" class="chip chip-claim" data-filter="claimed" aria-pressed="false">Claimed</button>
+          <button type="button" class="chip chip-claim" data-filter="unclaimed" aria-pressed="false">Unclaimed</button>
         </div>
 
         <label class="select-label">Sort
@@ -204,12 +215,13 @@
           <button type="button" class="tool-btn" id="print-btn">Print</button>
           <button type="button" class="tool-btn" id="backup-btn">Backup</button>
           <button type="button" class="tool-btn" id="restore-btn">Restore</button>
+          <button type="button" class="tool-btn" id="copy-unclaimed">Copy unclaimed</button>
           <button type="button" class="tool-btn danger" id="clear-btn">Clear list</button>
           <input id="restore-file" type="file" accept="application/json,.json" hidden>
         </div>
       </div>
 
-      <p class="tap-hint no-print">One row per person. The sheet is read only — press <strong>EDIT</strong> on a row to change a quantity, then press <strong>DONE</strong>. PAID and UNPAID can be tapped at any time. On phones, tap the caret beside a name to expand the size grid.</p>
+      <p class="tap-hint no-print">One row per person. The sheet is read only — press <strong>EDIT</strong> on a row to change a quantity, then press <strong>DONE</strong>. PAID and UNPAID can be tapped at any time. On phones, tap the caret beside a name to expand the size grid. <strong>Claimed shirts:</strong> shirts not yet handed over show in <strong>red</strong> (✗), claimed ones in green (✓). Press <strong>EDIT</strong> and tap <strong>CLAIMED / NOT CLAIMED</strong> under a size to change it — one tap per shirt when the quantity is more than one.</p>
 
       <div id="empty-state" class="empty">
         <div class="empty-shirt" aria-hidden="true">
@@ -270,6 +282,11 @@
             <strong id="sum-unpaid">₱0</strong>
             <span id="sum-unpaid-count">0 unpaid</span>
           </article>
+          <article class="stat claimed">
+            <p>CLAIMED</p>
+            <strong id="sum-claimed">0</strong>
+            <span id="sum-claimed-note">handed over so far</span>
+          </article>
         </div>
 
         <div class="matrix-block">
@@ -285,7 +302,20 @@
 
       <!-- explicit save below the tally, so nobody has to trust the invisible auto-save -->
       <div class="update-list no-print">
-        <button type="button" class="add-btn update-btn" id="update-list-btn">UPDATE LIST</button>
+        <div class="update-row">
+          <button type="button" class="add-btn update-btn" id="update-list-btn">UPDATE LIST</button>
+          <button type="button" class="ghost-btn save-as-btn" id="save-as-btn">SAVE LIST AS</button>
+        </div>
+        <form id="save-as-form" class="save-as-form" novalidate hidden>
+          <label class="field" for="save-as-name">NEW LIST NAME</label>
+          <div class="save-as-row">
+            <input id="save-as-name" type="text" maxlength="60" placeholder="e.g. Batch 2 orders" autocomplete="off">
+            <button type="submit" class="add-btn" id="save-as-go">SAVE</button>
+            <button type="button" class="ghost-btn" id="save-as-cancel">Cancel</button>
+          </div>
+          <p class="helper">Saves a copy of the names on this list as a new list. Everyone can open and update it.</p>
+          <p class="form-error" id="save-as-error" role="alert" hidden></p>
+        </form>
         <p class="update-when" id="update-when">Every change is also saved automatically as you go.</p>
       </div>
 
@@ -317,7 +347,7 @@
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
 
-  <script src="tally.js?v=10149c"></script>
-  <script src="app.js?v=10149c"></script>
+  <script src="tally.js?v=5f6075"></script>
+  <script src="app.js?v=5f6075"></script>
 </body>
 </html>

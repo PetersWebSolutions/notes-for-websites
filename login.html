@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=10149c">
+  <link rel="stylesheet" href="styles.css?v=5f6075">
 </head>
 <body class="gate">
   <main class="gate-wrap">
@@ -36,28 +36,14 @@
         <p id="login-error" class="form-error" role="alert" hidden></p>
         <button id="login-btn" class="add-btn gate-btn" type="submit">SIGN IN</button>
       </form>
-      <details class="gate-extra">
-        <summary>First time on this device?</summary>
-        <p class="helper">Add your name and choose a passcode for this browser.</p>
-        <form id="signup-form" class="gate-form" novalidate>
-          <div class="field-block">
-            <label class="field" for="new-name">YOUR NAME</label>
-            <input id="new-name" name="username" type="text" maxlength="40" autocomplete="username" required>
-          </div>
-          <div class="field-block">
-            <label class="field" for="new-pass">CHOOSE A PASSCODE</label>
-            <input id="new-pass" name="password" type="password" maxlength="60" autocomplete="new-password" required>
-          </div>
-          <p id="signup-error" class="form-error" role="alert" hidden></p>
-          <button id="signup-btn" class="ghost-btn" type="submit">Add me to this device</button>
-        </form>
-      </details>
-      <p class="gate-note">Your sign-in and saved files stay in this browser on this device. They are not shared with other devices. This is a lock screen, not security.</p>
+      <p class="gate-note">Sign in with your team name and passcode. This is a lock screen, not security.</p>
     </div>
   </main>
   <div id="toast" class="toast" hidden role="status"></div>
   <div id="live" class="sr-only" aria-live="polite"></div>
-  <script src="store.js?v=10149c"></script>
-  <script src="login.js?v=10149c"></script>
+  <script src="store.js?v=5f6075"></script>
+  <script src="supabase-config.js?v=5f6075"></script>
+  <script src="shared-store.js?v=5f6075"></script>
+  <script src="login.js?v=5f6075"></script>
 </body>
 </html>

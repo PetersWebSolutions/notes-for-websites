@@ -2,6 +2,9 @@
 (function () {
   const me = Store.session();
   if (!me) { window.location.replace("login.html"); return; }
+  /* Shared mode: the lists live in Supabase and everyone sees the same ones. */
+  const SHARED = Boolean(window.SharedStore && window.SharedStore.enabled());
+  let sharedLists = [];
   const list = document.getElementById("file-list");
   const fileName = document.getElementById("file-name");
   const fileError = document.getElementById("file-error");
@@ -53,24 +56,52 @@
     const count = fileCounts(doc);
     return `${count.people} ${count.people === 1 ? "person" : "people"} · ${count.shirts} ${count.shirts === 1 ? "shirt" : "shirts"}`;
   }
+  function allDocs() {
+    if (SHARED) return sharedLists.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return Store.docs().slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+  function findDoc(id) {
+    return SHARED ? sharedLists.find((doc) => doc.id === id) || null : Store.doc(id);
+  }
+  function openHref(doc) {
+    return SHARED ? `index.html?list=${encodeURIComponent(doc.id)}` : `index.html?doc=${encodeURIComponent(doc.id)}`;
+  }
   function render() {
-    const docs = Store.docs().slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const docs = allDocs();
     document.getElementById("who").textContent = `Signed in as ${me.name}`;
+    document.getElementById("files-title").textContent = SHARED ? "Saved lists" : "Saved files";
     document.getElementById("files-count").textContent = docs.length
-      ? `${docs.length} file${docs.length === 1 ? "" : "s"} on this device` : "Nothing saved yet";
+      ? `${docs.length} ${SHARED ? "list" : "file"}${docs.length === 1 ? "" : "s"}${SHARED ? " saved online" : " on this device"}`
+      : "Nothing saved yet";
     document.getElementById("files-empty").hidden = !!docs.length;
     list.hidden = !docs.length;
-    list.replaceChildren(...docs.map((doc) => h("li", { class: "file-item" },
-      h("div", { class: "file-info" },
-        h("h3", { class: "file-name", text: doc.name }),
-        h("p", { class: "file-meta", text: countsLabel(doc) + (doc.owner ? ` · by ${doc.owner}` : "") }),
-        h("p", { class: "file-time" }, "Last modified ", h("strong", { text: Store.formatDate(doc.updatedAt) }),
-          h("span", { class: "file-rel", text: ` · ${Store.relative(doc.updatedAt)}` }))),
-      h("div", { class: "file-actions" },
-        h("a", { class: "add-btn file-open", href: `index.html?doc=${encodeURIComponent(doc.id)}`, text: "OPEN", "aria-label": `Open ${doc.name}` }),
-        h("button", { type: "button", class: "ghost-btn", "data-rename": doc.id, text: "Rename", "aria-label": `Rename ${doc.name}` }),
-        h("button", { type: "button", class: "ghost-btn danger", "data-delete": doc.id, text: "Delete", "aria-label": `Delete ${doc.name}` }))
-    )));
+    list.replaceChildren(...docs.map((doc) => {
+      const who = SHARED ? doc.updatedBy : doc.updatedBy || doc.owner;
+      return h("li", { class: "file-item" },
+        h("div", { class: "file-info" },
+          h("h3", { class: "file-name", text: doc.name }),
+          h("p", { class: "file-meta", text: countsLabel(doc) + (!SHARED && doc.owner ? ` · by ${doc.owner}` : "") }),
+          h("p", { class: "file-time" }, who ? `Last modified by ${who} · ` : "Last modified ",
+            h("strong", { text: Store.formatDate(doc.updatedAt) }),
+            h("span", { class: "file-rel", text: ` · ${Store.relative(doc.updatedAt)}` }))),
+        h("div", { class: "file-actions" },
+          h("a", { class: "add-btn file-open", href: openHref(doc), text: "OPEN", "aria-label": `Open ${doc.name}` }),
+          h("button", { type: "button", class: "ghost-btn", "data-rename": doc.id, text: "Rename", "aria-label": `Rename ${doc.name}` }),
+          h("button", { type: "button", class: "ghost-btn danger", "data-delete": doc.id, text: "Delete", "aria-label": `Delete ${doc.name}` })));
+    }));
+  }
+  async function loadShared() {
+    const err = document.getElementById("files-load-error");
+    err.hidden = true;
+    document.getElementById("files-count").textContent = "Loading the saved lists…";
+    try {
+      sharedLists = await SharedStore.listAll({ withPeople: true });
+      render();
+    } catch (error) {
+      render();
+      err.textContent = "Could not load the saved lists. Check your connection and refresh.";
+      err.hidden = false;
+    }
   }
   function showPeople() { peopleHere.textContent = `On this device: ${Store.users().map((user) => user.name).join(", ")}`; }
   function openConfirm(doc) {
@@ -78,8 +109,11 @@
     document.getElementById("confirm-title").textContent = `Delete ${doc.name}?`;
     document.getElementById("confirm-body").textContent = `This removes ${countsLabel(doc)} from “${doc.name}”. This cannot be undone. Keep a backup first if you need one.`;
     document.getElementById("confirm-ok").textContent = "Delete file";
-    confirmHandler = () => {
-      if (!Store.deleteDoc(doc.id)) { showToast("Could not delete this file. Try again."); return; }
+    confirmHandler = async () => {
+      if (SHARED) {
+        if (!(await SharedStore.remove(doc.id))) { showToast("Could not delete this list online. Try again."); return; }
+        sharedLists = sharedLists.filter((item) => item.id !== doc.id);
+      } else if (!Store.deleteDoc(doc.id)) { showToast("Could not delete this file. Try again."); return; }
       render();
       showToast(`Deleted ${doc.name}.`);
     };
@@ -95,8 +129,24 @@
     else fileName.focus();
   }
 
-  document.getElementById("new-file").addEventListener("submit", (event) => {
+  document.getElementById("new-file").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (SHARED) {
+      const name = String(fileName.value || "").trim().replace(/\s+/g, " ").slice(0, 60);
+      if (!name) { setError(fileError, "Give the list a name."); announce("Give the list a name."); return; }
+      const button = document.getElementById("new-file-btn");
+      button.disabled = true;
+      const id = await SharedStore.create(name, [], me.name);
+      button.disabled = false;
+      if (!id) { setError(fileError, "Could not save the new list online. Check your connection and try again."); return; }
+      setError(fileError, "");
+      fileName.value = "";
+      sharedLists.unshift({ id, name, people: [], updatedAt: Date.now(), updatedBy: me.name });
+      render();
+      showToast(`Created ${name}.`);
+      fileName.focus();
+      return;
+    }
     const result = Store.createDoc(fileName.value, me.name);
     if (!result.ok) { setError(fileError, result.error); announce(result.error); return; }
     setError(fileError, "");
@@ -106,14 +156,24 @@
     fileName.focus();
   });
   fileName.addEventListener("input", () => setError(fileError, ""));
-  list.addEventListener("click", (event) => {
+  list.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-rename], [data-delete]");
     if (!button) return;
-    const doc = Store.doc(button.dataset.rename || button.dataset.delete);
+    const doc = findDoc(button.dataset.rename || button.dataset.delete);
     if (!doc) { render(); return; }
     if (button.hasAttribute("data-rename")) {
-      const name = window.prompt("New name for this file", doc.name);
+      const name = window.prompt(SHARED ? "New name for this list" : "New name for this file", doc.name);
       if (name === null) return;
+      if (SHARED) {
+        const cleaned = String(name).trim().replace(/\s+/g, " ").slice(0, 60);
+        if (!cleaned) { setError(fileError, "Give the list a name."); return; }
+        if (!(await SharedStore.rename(doc.id, cleaned))) { setError(fileError, "Could not rename the list online. Try again."); return; }
+        doc.name = cleaned;
+        setError(fileError, "");
+        render();
+        showToast("List renamed.");
+        return;
+      }
       const result = Store.renameDoc(doc.id, name);
       if (!result.ok) { setError(fileError, result.error); announce(result.error); return; }
       setError(fileError, "");
@@ -156,6 +216,17 @@
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }
   });
-  showPeople();
-  render();
+  if (SHARED) {
+    document.body.classList.add("shared-mode");
+    document.querySelectorAll(".files-shared-only").forEach((el) => { el.hidden = false; });
+    fileName.placeholder = "Name for the new list, e.g. Batch 2 orders";
+    document.getElementById("new-file-btn").textContent = "NEW LIST";
+    document.querySelector("#files-empty h3").textContent = "No lists yet";
+    document.querySelector("#files-empty p").textContent = "Name your first list above, then open it to start a tally.";
+    render();
+    loadShared();
+  } else {
+    showPeople();
+    render();
+  }
 })();
