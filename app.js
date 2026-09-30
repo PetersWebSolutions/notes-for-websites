@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "5f6075";
+const BUILD = "f0034b";
 
 const Tally = window.Tally;
 
@@ -21,6 +21,8 @@ const DOC = SHARED
   : (window.Store ? Store.doc(Store.currentDocId()) : null);
 /* Who is signed in — stamped on every save as "last modified by". */
 const ME = (window.Store && Store.session() && Store.session().name) || "";
+
+function readOnly() { return Boolean(DOC && DOC.owner && DOC.owner !== ME); }
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -209,6 +211,7 @@ function loadPeople() {
  * sendBeacon so the write still lands. Device storage is never touched.
  */
 function saveShared() {
+  if (readOnly()) return false;
   const state = document.getElementById("save-state");
   const leaving = document.visibilityState === "hidden";
   const at = Date.now();
@@ -230,6 +233,7 @@ function saveShared() {
 }
 
 function savePeople() {
+  if (readOnly()) return false;
   if (SHARED) return saveShared();
   if (!DOC) return false;
   const state = document.getElementById("save-state");
@@ -250,6 +254,7 @@ function savePeople() {
 }
 
 function scheduleSave() {
+  if (readOnly()) return;
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(savePeople, 400);
 }
@@ -714,6 +719,7 @@ function qtyCell(person, color, size, value, editing) {
         type: "button",
         class: `claim-toggle claim-${state}`,
         "data-action": "claim",
+        disabled: readOnly(),
         "data-claim": key,
         "aria-pressed": state === "all" ? "true" : "false",
         title: "Tap once per shirt handed over. Past the last one resets.",
@@ -742,7 +748,7 @@ function summaryCell(grid, person, editing) {
       const label = `${colorLabel(color)} ${size} for ${person.name}: ${got} of ${qty} claimed`;
       const props = editing
         ? { type: "button", class: `sum-chip is-${color} claim-${state} is-tappable`, "data-action": "claim",
-          "data-claim": cellKey(color, size), "aria-label": `${label}. Tap to change.` }
+          "data-claim": cellKey(color, size), disabled: readOnly(), "aria-label": `${label}. Tap to change.` }
         : { class: `sum-chip is-${color} claim-${state}`, "aria-label": label };
       wrap.append(h(editing ? "button" : "span", props,
         h("span", { class: "sum-color", text: colorLabel(color) }),
@@ -806,13 +812,14 @@ function renderRow(person) {
     type: "button",
     class: `pay-pill ${person.paid ? "is-paid" : "is-unpaid"}`,
     "data-action": "toggle",
+    disabled: readOnly(),
     "aria-pressed": person.paid ? "true" : "false",
     "aria-label": `${person.paid ? "Mark unpaid" : "Mark paid"}: ${person.name}`,
     text: person.paid ? "PAID" : "UNPAID"
   }));
 
   const actions = h("td", { class: "col-actions no-print", "data-label": "EDIT" });
-  actions.append(
+  if (!readOnly()) actions.append(
     h("button", {
       type: "button",
       class: `edit-btn${editing ? " is-done" : ""}`,
@@ -1134,7 +1141,7 @@ async function submitSaveAs(event) {
   const button = document.getElementById("save-as-go");
   const name = String(field.value || "").trim().replace(/\s+/g, " ").slice(0, 60);
   if (!name) { setFormError("save-as-error", "Give the new list a name."); field.focus(); return; }
-  flushPendingSave();
+  if (!readOnly()) flushPendingSave();
   const copy = JSON.parse(JSON.stringify(people));
   button.disabled = true;
   button.textContent = "Saving…";
@@ -1159,6 +1166,15 @@ async function submitSaveAs(event) {
 
 function render(options = {}) {
   showOpenFile();
+  const locked = readOnly();
+  document.getElementById("step-cart").hidden = locked;
+  document.getElementById("step-order").hidden = locked;
+  document.getElementById("read-only-note").hidden = !locked;
+  document.getElementById("open-file-owner").textContent = DOC && DOC.owner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "";
+  for (const id of ["update-list-btn", "clear-btn", "restore-btn", "recover-btn", "save-btn"]) {
+    const el = document.getElementById(id);
+    if (el) { el.hidden = locked; el.disabled = locked; }
+  }
   const keepScroll = options.keepScroll !== false;
   const scrollY = window.scrollY;
   renderTable();
@@ -1577,7 +1593,8 @@ function sharedBusy() {
 function applySharedRemote(remotePeople, updatedAt, info) {
   const before = JSON.stringify(people);
   const { restored } = restorePeople(remotePeople);
-  if (JSON.stringify(restored) === before) return;
+  if (info && info.createdBy !== undefined) DOC.owner = info.createdBy;
+  if (JSON.stringify(restored) === before) { render(); return; }
   if (sharedBusy()) return; // the next poll tries again
   people = restored;
   highlightId = null;
@@ -1605,6 +1622,7 @@ async function loadSharedList() {
     DOC.updatedAt = data.updatedAt || Date.now();
     if (data.updatedBy !== undefined) DOC.updatedBy = data.updatedBy;
     if (data.name) DOC.name = data.name;
+    DOC.owner = data.createdBy || "";
     render();
     renderListPicker();
     state.textContent = "Connected to the shared list — everyone on this site sees the same names.";
@@ -1620,6 +1638,11 @@ async function loadSharedList() {
 /* ---------- wiring ---------- */
 
 function bind() {
+  document.addEventListener("click", (event) => {
+    if (!readOnly()) return;
+    const target = event.target.closest("#update-list-btn, #clear-btn, #restore-btn, #recover-btn, #save-btn, #cart-clear, #add-person-btn, #order-body [data-action]:not([data-action=expand])");
+    if (target) { event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
   addForm.addEventListener("submit", addToCart);
   addForm.addEventListener("input", () => {
     delete addForm.dataset.confirmDup;
@@ -1637,7 +1660,7 @@ function bind() {
   tbody.addEventListener("change", onRowChange);
   tbody.addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
-    if (!button) return;
+    if (!button || (readOnly() && button.dataset.action !== "expand")) return;
     const id = button.closest("tr")?.dataset.id;
     if (!id) return;
     if (button.dataset.action === "toggle") togglePaid(id);

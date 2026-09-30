@@ -1937,3 +1937,6 @@ body.shared-mode .list-picker-label { display: inline-flex; }
 @media (max-width: 800px) {
   .update-row .save-as-btn { width: 100%; }
 }
+
+/* Ownership state must override section/layout display rules. */
+[hidden] { display: none !important; }

@@ -66,6 +66,7 @@
   function openHref(doc) {
     return SHARED ? `index.html?list=${encodeURIComponent(doc.id)}` : `index.html?doc=${encodeURIComponent(doc.id)}`;
   }
+  function canEdit(doc) { return !SHARED || !doc.createdBy || doc.createdBy === me.name; }
   function render() {
     const docs = allDocs();
     document.getElementById("who").textContent = `Signed in as ${me.name}`;
@@ -77,17 +78,18 @@
     list.hidden = !docs.length;
     list.replaceChildren(...docs.map((doc) => {
       const who = SHARED ? doc.updatedBy : doc.updatedBy || doc.owner;
+      const mine = canEdit(doc);
       return h("li", { class: "file-item" },
         h("div", { class: "file-info" },
           h("h3", { class: "file-name", text: doc.name }),
-          h("p", { class: "file-meta", text: countsLabel(doc) + (!SHARED && doc.owner ? ` · by ${doc.owner}` : "") }),
+          h("p", { class: "file-meta", text: countsLabel(doc) + (SHARED && doc.createdBy ? ` · ${mine ? "Your list" : `${doc.createdBy}'s list · view only`}` : (!SHARED && doc.owner ? ` · by ${doc.owner}` : "")) }),
           h("p", { class: "file-time" }, who ? `Last modified by ${who} · ` : "Last modified ",
             h("strong", { text: Store.formatDate(doc.updatedAt) }),
             h("span", { class: "file-rel", text: ` · ${Store.relative(doc.updatedAt)}` }))),
         h("div", { class: "file-actions" },
-          h("a", { class: "add-btn file-open", href: openHref(doc), text: "OPEN", "aria-label": `Open ${doc.name}` }),
-          h("button", { type: "button", class: "ghost-btn", "data-rename": doc.id, text: "Rename", "aria-label": `Rename ${doc.name}` }),
-          h("button", { type: "button", class: "ghost-btn danger", "data-delete": doc.id, text: "Delete", "aria-label": `Delete ${doc.name}` })));
+          h("a", { class: "add-btn file-open", href: openHref(doc), text: mine ? "OPEN" : "VIEW", "aria-label": `${mine ? "Open" : "View"} ${doc.name}` }),
+          mine && h("button", { type: "button", class: "ghost-btn", "data-rename": doc.id, text: "Rename", "aria-label": `Rename ${doc.name}` }),
+          mine && h("button", { type: "button", class: "ghost-btn danger", "data-delete": doc.id, text: "Delete", "aria-label": `Delete ${doc.name}` })));
     }));
   }
   async function loadShared() {
@@ -105,6 +107,7 @@
   }
   function showPeople() { peopleHere.textContent = `On this device: ${Store.users().map((user) => user.name).join(", ")}`; }
   function openConfirm(doc) {
+    if (!canEdit(doc)) return;
     returnFocus = document.activeElement;
     document.getElementById("confirm-title").textContent = `Delete ${doc.name}?`;
     document.getElementById("confirm-body").textContent = `This removes ${countsLabel(doc)} from “${doc.name}”. This cannot be undone. Keep a backup first if you need one.`;
@@ -141,7 +144,7 @@
       if (!id) { setError(fileError, "Could not save the new list online. Check your connection and try again."); return; }
       setError(fileError, "");
       fileName.value = "";
-      sharedLists.unshift({ id, name, people: [], updatedAt: Date.now(), updatedBy: me.name });
+      sharedLists.unshift({ id, name, people: [], updatedAt: Date.now(), updatedBy: me.name, createdBy: me.name });
       render();
       showToast(`Created ${name}.`);
       fileName.focus();
@@ -160,7 +163,7 @@
     const button = event.target.closest("[data-rename], [data-delete]");
     if (!button) return;
     const doc = findDoc(button.dataset.rename || button.dataset.delete);
-    if (!doc) { render(); return; }
+    if (!doc || !canEdit(doc)) { render(); return; }
     if (button.hasAttribute("data-rename")) {
       const name = window.prompt(SHARED ? "New name for this list" : "New name for this file", doc.name);
       if (name === null) return;
