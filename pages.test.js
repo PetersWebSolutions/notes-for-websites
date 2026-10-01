@@ -94,8 +94,17 @@ test('files sorted by modification, counts and optional owner rendered as plain 
   assert.equal(b.q('#who').textContent,'Signed in as Joyce');
   assert.equal(b.q('#files-count').textContent,'2 files on this device');
 });
+test('device file owners alone can rename/delete their files; other accounts get VIEW', t => {
+  const store=profile([{...documentA,owner:'Joyce'}]);
+  store[KEYS.session]=JSON.stringify({id:'fixed-stuts',name:'Stuts',at:1});
+  const b=page(t,'lists.html',store);
+  assert.match(b.q('.file-open').textContent,/VIEW/);
+  assert.match(b.q('.file-meta').textContent,/Joyce's file · view only/);
+  assert.equal(b.q('[data-rename="a"]'),null);
+  assert.equal(b.q('[data-delete="a"]'),null);
+});
 test('rename prompt cancellation, blank-name error and successful rename/sort', t => {
-  const b=page(t,'lists.html',profile());
+  const b=page(t,'lists.html',profile([{...documentA},{...documentB,owner:'Joyce'}]));
   b.w.prompt=()=>null; b.q('[data-rename="b"]').click();
   assert.equal(b.S.doc('b').name,'Other file');
   b.w.prompt=()=>''; b.q('[data-rename="b"]').click();

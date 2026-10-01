@@ -82,7 +82,8 @@ function handleSharedLists(req, res, url) {
         people: Array.isArray(incoming.people) ? incoming.people : [],
         updated_at: incoming.updated_at || new Date().toISOString(),
         name: incoming.name !== undefined ? incoming.name : (prior.name || null),
-        updated_by: incoming.updated_by !== undefined ? incoming.updated_by : (prior.updated_by || null)
+        updated_by: incoming.updated_by !== undefined ? incoming.updated_by : (prior.updated_by || null),
+        created_by: incoming.created_by !== undefined ? incoming.created_by : (prior.created_by || null)
       };
       writeRows(rows.filter((item) => item.id !== row.id).concat([row]));
       res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });

@@ -66,7 +66,13 @@
   function openHref(doc) {
     return SHARED ? `index.html?list=${encodeURIComponent(doc.id)}` : `index.html?doc=${encodeURIComponent(doc.id)}`;
   }
-  function canEdit(doc) { return !SHARED || !doc.createdBy || doc.createdBy === me.name; }
+  function ownerKey(value) { return String(value || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+  function canEdit(doc) {
+    const owner = ownerKey(SHARED ? doc && doc.createdBy : doc && doc.owner);
+    const current = ownerKey(me && me.name);
+    if (!owner) return !SHARED; // shared rows fail closed; keep ownerless local legacy files usable
+    return Boolean(current && owner === current);
+  }
   function render() {
     const docs = allDocs();
     document.getElementById("who").textContent = `Signed in as ${me.name}`;
@@ -79,10 +85,14 @@
     list.replaceChildren(...docs.map((doc) => {
       const who = SHARED ? doc.updatedBy : doc.updatedBy || doc.owner;
       const mine = canEdit(doc);
+      const maker = String(doc.createdBy || "").trim();
+      const ownerMeta = SHARED
+        ? (ownerKey(maker) ? (mine ? "Your list" : `${maker}'s list · view only`) : "Owner not recorded · view only")
+        : (doc.owner ? (mine ? `by ${doc.owner}` : `${doc.owner}'s file · view only`) : "");
       return h("li", { class: "file-item" },
         h("div", { class: "file-info" },
           h("h3", { class: "file-name", text: doc.name }),
-          h("p", { class: "file-meta", text: countsLabel(doc) + (SHARED && doc.createdBy ? ` · ${mine ? "Your list" : `${doc.createdBy}'s list · view only`}` : (!SHARED && doc.owner ? ` · by ${doc.owner}` : "")) }),
+          h("p", { class: "file-meta", text: countsLabel(doc) + (ownerMeta ? ` · ${ownerMeta}` : "") }),
           h("p", { class: "file-time" }, who ? `Last modified by ${who} · ` : "Last modified ",
             h("strong", { text: Store.formatDate(doc.updatedAt) }),
             h("span", { class: "file-rel", text: ` · ${Store.relative(doc.updatedAt)}` }))),
@@ -99,10 +109,21 @@
     try {
       sharedLists = await SharedStore.listAll({ withPeople: true });
       render();
+      if (typeof SharedStore.ownershipReady === "function" && !SharedStore.ownershipReady()) {
+        err.textContent = SharedStore.ownershipMessage();
+        err.hidden = false;
+        document.getElementById("new-file-btn").disabled = true;
+        fileName.disabled = true;
+      }
     } catch (error) {
       render();
-      err.textContent = "Could not load the saved lists. Check your connection and refresh.";
+      const setupError = error && /migration/i.test(error.message || "") ? error.message : "Could not load the saved lists. Check your connection and refresh.";
+      err.textContent = setupError;
       err.hidden = false;
+      if (/migration/i.test(setupError)) {
+        document.getElementById("new-file-btn").disabled = true;
+        fileName.disabled = true;
+      }
     }
   }
   function showPeople() { peopleHere.textContent = `On this device: ${Store.users().map((user) => user.name).join(", ")}`; }
@@ -114,7 +135,7 @@
     document.getElementById("confirm-ok").textContent = "Delete file";
     confirmHandler = async () => {
       if (SHARED) {
-        if (!(await SharedStore.remove(doc.id))) { showToast("Could not delete this list online. Try again."); return; }
+        if (!(await SharedStore.remove(doc.id, me.name))) { showToast("Could not delete this list online. Try again."); return; }
         sharedLists = sharedLists.filter((item) => item.id !== doc.id);
       } else if (!Store.deleteDoc(doc.id)) { showToast("Could not delete this file. Try again."); return; }
       render();
@@ -170,7 +191,7 @@
       if (SHARED) {
         const cleaned = String(name).trim().replace(/\s+/g, " ").slice(0, 60);
         if (!cleaned) { setError(fileError, "Give the list a name."); return; }
-        if (!(await SharedStore.rename(doc.id, cleaned))) { setError(fileError, "Could not rename the list online. Try again."); return; }
+        if (!(await SharedStore.rename(doc.id, cleaned, me.name))) { setError(fileError, "Could not rename the list online. Try again."); return; }
         doc.name = cleaned;
         setError(fileError, "");
         render();

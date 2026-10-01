@@ -12,7 +12,7 @@ const { createServer, DATA_FILE } = require('./tools/preview-server.js');
 const tick = (ms = 25) => new Promise(r => setTimeout(r, ms));
 
 /* Boot index.html in shared mode with a stub SharedStore backend. */
-function sharedBoot(t, { people = [], saveOk = true, loadFails = false, session = false } = {}) {
+function sharedBoot(t, { people = [], saveOk = true, loadFails = false, session = true, createdBy = 'Joyce' } = {}) {
   const store = session ? { 'team-elite-session-v1': JSON.stringify({ id: 'fixed-joyce', name: 'Joyce', at: 1 }) } : {};
   const b = boot('index.html', store, 'https://example.test/index.html', ['store.js', 'tally.js']);
   t.after(b.close);
@@ -26,7 +26,7 @@ function sharedBoot(t, { people = [], saveOk = true, loadFails = false, session 
       rememberWrite: () => {},
       load: () => ${loadFails
         ? 'Promise.reject(new Error("offline"))'
-        : `Promise.resolve({ people: ${JSON.stringify(people)}, updatedAt: 1759000000000, name: "Shared list", updatedBy: "Gen" })`},
+        : `Promise.resolve({ people: ${JSON.stringify(people)}, updatedAt: 1759000000000, name: "Shared list", updatedBy: "Gen", createdBy: ${JSON.stringify(createdBy)} })`},
       listAll: () => Promise.resolve([{ id: "main", name: "Shared list", updatedBy: "Gen" }, { id: "batch-2-x", name: "Batch 2", updatedBy: "Stuts" }]),
       create: (name, list, by) => { window.__sharedCalls.created.push({ name, list, by }); return Promise.resolve(${saveOk} ? "new-list-id" : ""); },
       save: (list, opts) => { window.__sharedCalls.save.push(list); window.__sharedCalls.saveOpts.push(opts); return Promise.resolve(${saveOk}); },
@@ -49,8 +49,31 @@ test('shared-store.js stays disabled without a Supabase connection', t => {
   assert.equal(dom.window.SharedStore.enabled(), false);
 });
 
+test('shared-store.js leaves legacy-schema lists view-only and shows the owner migration message', async t => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://example.test/', runScripts: 'dangerously' });
+  t.after(() => dom.window.close());
+  dom.window.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k' };
+  let calls = 0;
+  dom.window.fetch = async () => {
+    calls += 1;
+    return calls === 1
+      ? { ok: false, status: 400 }
+      : { ok: true, json: async () => [{ id: 'old', name: 'Old list', updated_by: 'Gen' }] };
+  };
+  const script = dom.window.document.createElement('script');
+  script.textContent = read('shared-store.js');
+  dom.window.document.body.appendChild(script);
+  const lists = await dom.window.SharedStore.listAll();
+  assert.equal(lists[0].createdBy, '');
+  assert.equal(dom.window.SharedStore.ownershipReady(), false);
+  assert.match(dom.window.SharedStore.ownershipMessage(), /0003_list_owner\.sql/);
+  assert.equal(await dom.window.SharedStore.create('Unowned', [], 'Joyce'), '');
+  assert.equal(calls, 2, 'an unowned row must never be posted');
+});
+
 test('shared-store.js round-trips one shared row through the Supabase-shaped API', async t => {
   try { fs.unlinkSync(DATA_FILE); } catch (error) { /* first run */ }
+  fs.writeFileSync(DATA_FILE, JSON.stringify([{ id: 'main', name: 'Shared list', people: [], created_by: 'Joyce', updated_by: '', updated_at: new Date(1759000000000).toISOString() }]));
   t.after(() => { try { fs.unlinkSync(DATA_FILE); } catch (error) { /* already gone */ } });
   const server = createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -74,7 +97,7 @@ test('shared-store.js round-trips one shared row through the Supabase-shaped API
   const joyce = visitor();
   t.after(joyce.close);
   assert.equal(joyce.w.SharedStore.enabled(), true);
-  assert.deepEqual(plain(await joyce.w.SharedStore.load()), { people: [], updatedAt: 0, name: 'Shared list', updatedBy: '', createdBy: '', exists: false });
+  assert.deepEqual(plain(await joyce.w.SharedStore.load()), { people: [], updatedAt: 1759000000000, name: 'Shared list', updatedBy: '', createdBy: 'Joyce', exists: true });
   assert.equal(await joyce.w.SharedStore.save([ana], { at: 1759000000000, by: 'Joyce' }), true);
   const back = await joyce.w.SharedStore.load();
   assert.deepEqual(plain(back.people), [ana]);
@@ -82,20 +105,25 @@ test('shared-store.js round-trips one shared row through the Supabase-shaped API
   assert.equal(back.updatedBy, 'Joyce');
   assert.equal(back.name, 'Shared list');
 
-  // A second visitor, brand new, sees the same shared list.
+  // A second visitor sees the same shared list but the helper refuses writes
+  // when the signed-in name does not match its recorded maker.
   const ben2 = visitor();
   t.after(ben2.close);
   assert.deepEqual(plain((await ben2.w.SharedStore.load()).people), [ana]);
-  assert.equal(await ben2.w.SharedStore.save([ana, ben], { at: 1759000001000, by: 'Ben' }), true);
+  assert.equal(await ben2.w.SharedStore.save([ana, ben], { at: 1759000001000, by: 'Ben' }), false);
+  const unchanged = await joyce.w.SharedStore.load();
+  assert.deepEqual(plain(unchanged.people), [ana]);
+  assert.equal(await joyce.w.SharedStore.save([ana, ben], { at: 1759000002000, by: 'Joyce' }), true);
   const after = await joyce.w.SharedStore.load();
   assert.equal(after.people.length, 2);
-  assert.equal(after.updatedBy, 'Ben');
+  assert.equal(after.updatedBy, 'Joyce');
+  assert.equal(after.createdBy, 'Joyce', 'saving must preserve the recorded maker');
 
   // SAVE LIST AS: a new row that every visitor can list and open by ?list=<id>.
   const id = await ben2.w.SharedStore.create('Batch 2 orders', [ben], 'Ben');
   assert.match(id, /^batch-2-orders-/);
   const all = plain(await joyce.w.SharedStore.listAll());
-  assert.deepEqual(all.map(l => [l.id, l.name, l.updatedBy]), [[id, 'Batch 2 orders', 'Ben'], ['main', 'Shared list', 'Ben']]);
+  assert.deepEqual(all.map(l => [l.id, l.name, l.updatedBy]), [[id, 'Batch 2 orders', 'Ben'], ['main', 'Shared list', 'Joyce']]);
   const dom3 = new JSDOM('<!doctype html><html><body></body></html>', { url: `https://example.test/index.html?list=${id}`, runScripts: 'dangerously' });
   t.after(() => dom3.window.close());
   dom3.window.fetch = (url, init) => fetch(url, init);
@@ -106,6 +134,7 @@ test('shared-store.js round-trips one shared row through the Supabase-shaped API
   assert.equal(dom3.window.SharedStore.listId(), id);
   const opened = await dom3.window.SharedStore.load();
   assert.equal(opened.name, 'Batch 2 orders');
+  assert.equal(opened.createdBy, 'Ben');
   assert.deepEqual(plain(opened.people), [ben]);
 });
 
@@ -117,7 +146,7 @@ test('shared mode opens to everyone and renders the online list, not device stor
   assert.equal(b.q('#open-file-name').textContent, 'Shared list');
   assert.match(b.q('#save-state').textContent, /Connected to the shared list/);
   assert.equal(b.q('#sum-shirts').textContent, '7');
-  assert.deepEqual(snapshot(b.w), {});
+  assert.deepEqual(snapshot(b.w), { 'team-elite-session-v1': JSON.stringify({ id: 'fixed-joyce', name: 'Joyce', at: 1 }) });
 });
 
 test('shared mode: UPDATE LIST force-writes the pending edit and confirms after the network answers', async t => {
@@ -134,7 +163,7 @@ test('shared mode: UPDATE LIST force-writes the pending edit and confirms after 
   assert.equal(b.q('#update-list-btn').classList.contains('is-saved'), true);
   assert.match(b.q('#update-when').textContent, /^Last saved /);
   assert.match(b.q('#toast').textContent, /Saved to the shared list/);
-  assert.deepEqual(snapshot(b.w), {});
+  assert.deepEqual(snapshot(b.w), { 'team-elite-session-v1': JSON.stringify({ id: 'fixed-joyce', name: 'Joyce', at: 1 }) });
   await new Promise(r => setTimeout(r, 2300));
   assert.equal(b.q('#update-list-btn').textContent, 'UPDATE LIST');
 });
@@ -151,7 +180,7 @@ test('shared mode: a failed write shows an error instead of a false Saved', asyn
 });
 
 test('shared mode: an unreachable database reports an error with Retry and writes nothing', async t => {
-  const b = sharedBoot(t, { loadFails: true });
+  const b = sharedBoot(t, { loadFails: true, session: false });
   await tick();
   assert.equal(b.q('#order-body').children.length, 0);
   assert.equal(b.q('#save-state').classList.contains('is-error'), true);
@@ -269,8 +298,8 @@ function sharedListsBoot(t, { lists = [], fail = false } = {}) {
 
 test('lists page in shared mode: lists from the database with who modified them; OPEN goes to ?list=', async t => {
   const b = sharedListsBoot(t, { lists: [
-    { id: 'main', name: 'Shared list', updatedAt: 1759000000000, updatedBy: 'Gen', people: [ana, ben] },
-    { id: 'batch-2-x', name: 'Batch 2', updatedAt: 1759100000000, updatedBy: 'Stuts', people: [ben] }
+    { id: 'main', name: 'Shared list', updatedAt: 1759000000000, updatedBy: 'Gen', createdBy: 'Joyce', people: [ana, ben] },
+    { id: 'batch-2-x', name: 'Batch 2', updatedAt: 1759100000000, updatedBy: 'Stuts', createdBy: 'Joyce', people: [ben] }
   ] });
   await tick();
   assert.equal(b.q('body').classList.contains('shared-mode'), true);
@@ -311,22 +340,29 @@ test('lists page in shared mode: an unreachable database shows an error, not an 
 });
 
 
-test('shared store detects silently refused rename and delete', async t => {
+test('shared store restricts rename and delete to the recorded maker', async t => {
   const dom = new JSDOM('<body></body>', { url: 'https://example.test/', runScripts: 'dangerously' });
   t.after(() => dom.window.close());
   dom.window.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k' };
   const calls = [];
-  dom.window.fetch = async (url, opts) => { calls.push(opts); return { ok: true, json: async () => [] }; };
+  dom.window.fetch = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    return opts.method === 'GET'
+      ? { ok: true, json: async () => [{ id: 'exists', name: 'Existing', created_by: 'Joyce' }] }
+      : { ok: true, json: async () => [{ id: 'exists' }] };
+  };
   const script = dom.window.document.createElement('script');
   script.textContent = read('shared-store.js');
   dom.window.document.body.append(script);
-  assert.equal(await dom.window.SharedStore.rename('missing', 'New name'), false);
-  assert.equal(await dom.window.SharedStore.remove('missing'), false);
-  assert.equal(calls[0].headers.Prefer, 'return=representation');
-  assert.equal(calls[1].headers.Prefer, 'return=representation');
-  dom.window.fetch = async () => ({ ok: true, json: async () => [{ id: 'exists' }] });
-  assert.equal(await dom.window.SharedStore.rename('exists', 'New name'), true);
-  assert.equal(await dom.window.SharedStore.remove('exists'), true);
+  await dom.window.SharedStore.listAll();
+  assert.equal(await dom.window.SharedStore.rename('exists', 'New name', 'Gen'), false);
+  assert.equal(await dom.window.SharedStore.remove('exists', 'Gen'), false);
+  assert.equal(calls.length, 1, 'unauthorized operations are rejected before a request');
+  assert.equal(await dom.window.SharedStore.rename('missing', 'New name', 'Joyce'), false);
+  assert.equal(await dom.window.SharedStore.rename('exists', 'New name', 'Joyce'), true);
+  assert.equal(await dom.window.SharedStore.remove('exists', 'Joyce'), true);
+  assert.equal(calls[1].opts.headers.Prefer, 'return=representation');
+  assert.equal(calls[2].opts.headers.Prefer, 'return=representation');
 });
 
 test('shared list owner sees editing actions; others only VIEW', async t => {
@@ -340,6 +376,30 @@ test('shared list owner sees editing actions; others only VIEW', async t => {
   assert.equal(b.q('[data-delete="theirs"]'), null);
   assert.match(b.q('.file-list, #file-list').textContent, /Gen's list · view only/);
   assert.match(b.q('a[href="index.html?list=theirs"]').textContent, /VIEW/);
+});
+
+test('shared lists with unknown owners are view-only on the files page', async t => {
+  const b = sharedListsBoot(t, { lists: [
+    { id: 'legacy', name: 'Legacy list', createdBy: '', people: [] }
+  ] });
+  await tick();
+  assert.match(b.q('.file-meta').textContent, /Owner not recorded · view only/);
+  assert.match(b.q('.file-open').textContent, /VIEW/);
+  assert.equal(b.q('[data-rename="legacy"]'), null);
+  assert.equal(b.q('[data-delete="legacy"]'), null);
+});
+
+test('shared list with no recorded maker is locked and cannot be saved', async t => {
+  const b = sharedBoot(t, { people: [ana], createdBy: '' });
+  await tick();
+  assert.equal(b.q('#read-only-note').hidden, false);
+  assert.match(b.q('#read-only-note').textContent, /no recorded maker/);
+  assert.match(b.q('#open-file-owner').textContent, /Owner not recorded/);
+  assert.equal(b.q('#step-order').hidden, true);
+  assert.equal(b.q('#step-cart').hidden, true);
+  b.q('#update-list-btn').click();
+  await tick();
+  assert.equal(b.w.__sharedCalls.save.length, 0);
 });
 
 test('shared list made by another account is read-only but can be copied', async t => {
