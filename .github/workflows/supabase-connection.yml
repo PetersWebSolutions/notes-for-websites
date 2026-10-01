@@ -57,12 +57,12 @@ jobs:
           status=$(curl -sS -o /tmp/row.json -w '%{http_code}' \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY" \
-            "$SUPABASE_URL/rest/v1/shared_lists?id=eq.$LIST_ID&select=id,updated_at")
+            "$SUPABASE_URL/rest/v1/shared_lists?id=eq.$LIST_ID&select=id,updated_at,created_by")
           echo "HTTP $status"
           cat /tmp/row.json
           echo
           if [ "$status" != "200" ]; then
-            echo "::error::Shared list request returned HTTP $status. The project may be paused, the anon key rotated, or the RLS policies removed."
+            echo "::error::Shared-list request returned HTTP $status. Check the Supabase project, anon key, RLS policies, and run migration 0003_list_owner.sql for owner tracking."
             exit 1
           fi
 
@@ -72,9 +72,12 @@ jobs:
           node -e '
             const rows = JSON.parse(require("node:fs").readFileSync("/tmp/row.json", "utf8"));
             if (!Array.isArray(rows) || !rows.length) {
-              console.error("::error::The endpoint answered but the shared row is missing. Re-run the migration in supabase/migrations/.");
+              console.error("::error::The endpoint answered but the shared row is missing. Re-run the migrations in supabase/migrations/.");
+              process.exitCode = 1;
+            } else if (!Object.prototype.hasOwnProperty.call(rows[0], "created_by")) {
+              console.error("::error::Owner tracking is missing. Run supabase/migrations/0003_list_owner.sql.");
               process.exitCode = 1;
             } else {
-              console.log("shared row present, updated_at=" + rows[0].updated_at);
+              console.log("shared row present; owner tracking column is available; updated_at=" + rows[0].updated_at);
             }
           '

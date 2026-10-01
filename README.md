@@ -113,64 +113,76 @@ the ordered quantity whenever a row is edited or loaded.
 
 The existing single list (`team-elite-ph-tshirt-people-v2`) becomes **Main list** on the first visit to Saved files. Its original storage key is left untouched as a fallback, even after edits or deletion of the migrated file. Older person shapes are normalized when that file is opened: the old white size, blue size, and extra 3XL/4XL columns become items. The old extra columns carried no color, so they are read as **white**. Anything saved from here on uses the shape above, and a **Backup** from an earlier version still restores.
 
-## Shared list (Supabase)
+## Shared lists (Supabase)
 
-By default the tally is device-local, as described above. To make **one list
-that everyone who opens the site sees and edits**, connect a free Supabase
-project:
+By default the tally is device-local, as described above. To make lists visible
+across devices, connect a Supabase project. In the site UI, each list records a
+maker: that account can edit, rename, or delete its list; other signed-in
+accounts can view it or save a copy.
 
 1. Create a project at <https://supabase.com>.
-2. Open **SQL Editor** and run the whole of
+2. Open **SQL Editor** and run
    [`supabase/migrations/0001_shared_lists.sql`](supabase/migrations/0001_shared_lists.sql).
-   It creates the `public.shared_lists` table, seeds the `main` row, turns on
-   row-level security and adds the three anon policies. It is safe to re-run,
-   and it carries a commented block that confines the anon role to the single
-   `main` row when you want to stop the list being open to every visitor.
-3. Copy the **Project URL** and the **anon public** key from
+   It creates `public.shared_lists`, seeds the `main` row, turns on row-level
+   security, and adds the anon policies.
+3. Copy the **Project URL** and **anon public** key from
    **Project Settings → API** into `supabase-config.js`.
+4. Run
+   [`supabase/migrations/0002_list_names_and_editor.sql`](supabase/migrations/0002_list_names_and_editor.sql),
+   then
+   [`supabase/migrations/0003_list_owner.sql`](supabase/migrations/0003_list_owner.sql).
+   These add list names, last-editor metadata, and the maker column. If owner
+   tracking is missing, the site can show older rows read-only with a migration
+   message, but it will not silently make ownerless lists editable.
 
 The connection is checked for you: `.github/workflows/supabase-connection.yml`
-reads the URL and key straight out of `supabase-config.js` once a day and
-requests the shared row exactly the way the browser does. A paused project, a
-rotated key or a dropped policy shows up as a red run instead of a silently
-device-local site. It can also be started by hand from the Actions tab.
+reads the URL and key from `supabase-config.js` once a day and requests the
+shared row. A paused project, rotated key, or dropped policy shows up as a red
+run instead of a silently device-local site. It can also be started by hand
+from the Actions tab.
 
-4. Also run
-   [`supabase/migrations/0002_list_names_and_editor.sql`](supabase/migrations/0002_list_names_and_editor.sql).
-   It adds `name` and `updated_by` columns, which power **SAVE LIST AS** and
-   the **Last modified by Joyce · date** line. The site still works before it
-   runs (saves fall back to the original columns, without a name or editor).
+With a URL configured, sign-in leads to `lists.html`, which shows every online
+list, its maker, and who last modified it. **OPEN** loads a list in the tally;
+other makers' lists are **VIEW** only. **NEW LIST** and **SAVE LIST AS** create
+lists owned by the signed-in name. The **Open list** menu switches between
+lists. Pages poll every five seconds and refresh when another visitor changes
+a list, never mid-edit.
 
-With a URL configured, sign-in leads to `lists.html`, which shows every list
-saved online with who last modified it and when. **OPEN** loads that list in
-the tally (`index.html?list=<id>`); **NEW LIST** starts an empty one; Rename
-and Delete work online too (Delete needs the policy from migration 0002).
-Every save, UPDATE LIST, toggle and clear writes to Supabase stamped with the
-signed-in name. **SAVE LIST AS** (beside UPDATE LIST) copies the names on
-screen into a new list under the name you give it, which then appears on the
-lists page for everyone; the **Open list** menu in the top bar switches
-between lists without going back. Pages poll every five seconds and refresh when
-someone else changes the list (never mid-edit, so no keystroke is dropped).
-Closing the tab flushes the pending save via `sendBeacon`.
+### Existing lists
 
-Notes:
+Migration 0003 cannot infer who originally made older lists, so those rows keep
+`created_by = NULL` and are read-only until their true maker is assigned. Do
+not use `updated_by` as the owner automatically: it records the last editor,
+not necessarily the maker. Check the rows, then assign each verified owner in
+Supabase SQL Editor, for example:
 
-- The anon key is designed to be public; access is governed by the RLS
-  policies above. Those policies intentionally allow anyone to read and write
-  the shared list — that is what makes the list visible to everyone. If the
-  list should not be public, tighten the policies and add real Supabase Auth.
+```sql
+select id, name, created_by, updated_by from public.shared_lists;
+-- Only if Joyce is the verified maker of the main list:
+update public.shared_lists set created_by = 'Joyce' where id = 'main' and created_by is null;
+```
+
+### Important security limitation
+
+The owner-only rule currently hides and blocks edit controls in the site UI; it
+is **not server-enforced authorization**. This site's sign-in is a browser-side
+lock screen, and the current Supabase anon policies permit direct writes. A
+visitor with the public anon key can bypass the UI and call the database API.
+For a real security boundary, the app must use Supabase Auth (or another
+server-verified identity) and Row Level Security policies tied to
+`auth.uid()`—the current localStorage login cannot provide that identity.
+
 - One shared row means last write wins if two people save in the same second.
-- With `url` left empty in `supabase-config.js` the site behaves exactly as
-  before: private, per-browser files.
-- `tools/preview-server.js` serves the site with a stand-in shared backend so
-  the shared mode can be tried locally before connecting Supabase:
-  `node tools/preview-server.js` then open <http://127.0.0.1:8080>. The
-  real-browser suite expects device-local mode, so keep using
-  `python3 -m http.server 8080` for `npm run test:e2e`.
+- With `url` left empty in `supabase-config.js` the site behaves as before:
+  private, per-browser files.
+- `tools/preview-server.js` serves a stand-in shared backend so shared mode can
+  be tried locally before connecting Supabase: `node tools/preview-server.js`
+  then open <http://127.0.0.1:8080>. The real-browser suite expects
+  device-local mode, so use `python3 -m http.server 8080` for `npm run test:e2e`.
 - `supabase-config.js` is part of the build stamp, and Vercel serves it with
-  `Cache-Control: public, max-age=0, must-revalidate`. Changing the project
-  URL or rotating the anon key therefore reaches every visitor on their next
-  load, instead of being held back by a cached copy of the old connection.
+  `Cache-Control: public, max-age=0, must-revalidate`. Changing the project URL
+  or anon key therefore reaches every visitor on their next load, instead of
+  being held back by a cached copy of the old connection.
 
 ## Tests
 

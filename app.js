@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "f0034b";
+const BUILD = "cfedf5";
 
 const Tally = window.Tally;
 
@@ -22,7 +22,17 @@ const DOC = SHARED
 /* Who is signed in — stamped on every save as "last modified by". */
 const ME = (window.Store && Store.session() && Store.session().name) || "";
 
-function readOnly() { return Boolean(DOC && DOC.owner && DOC.owner !== ME); }
+function ownerKey(value) { return String(value || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+function readOnly() {
+  if (!DOC) return false;
+  if (SHARED) {
+    // Shared rows without a recorded maker are locked, never implicitly editable.
+    const owner = ownerKey(DOC.owner);
+    const me = ownerKey(ME);
+    return !owner || !me || owner !== me;
+  }
+  return Boolean(DOC.owner && ownerKey(DOC.owner) !== ownerKey(ME));
+}
 
 const addForm = document.getElementById("add-form");
 const nameInput = document.getElementById("name-input");
@@ -304,6 +314,7 @@ function flashSaved() {
  */
 let updateTimer = 0;
 async function updateList() {
+  if (readOnly()) return;
   const button = document.getElementById("update-list-btn");
   const when = document.getElementById("update-when");
   if (SHARED) {
@@ -1156,7 +1167,12 @@ async function submitSaveAs(event) {
   button.disabled = false;
   button.textContent = "SAVE";
   if (!id) {
-    if (SHARED) setFormError("save-as-error", "Could not save to the shared database. Check your connection and try again.");
+    if (SHARED) {
+      const setupMessage = typeof SharedStore.ownershipReady === "function" && !SharedStore.ownershipReady()
+        ? SharedStore.ownershipMessage()
+        : "Could not save to the shared database. Check your connection and try again.";
+      setFormError("save-as-error", setupMessage);
+    }
     return;
   }
   showToast(`Saved as ${name}. Opening it now…`);
@@ -1167,10 +1183,19 @@ async function submitSaveAs(event) {
 function render(options = {}) {
   showOpenFile();
   const locked = readOnly();
+  const hasSharedOwner = SHARED && Boolean(ownerKey(DOC && DOC.owner));
   document.getElementById("step-cart").hidden = locked;
   document.getElementById("step-order").hidden = locked;
-  document.getElementById("read-only-note").hidden = !locked;
-  document.getElementById("open-file-owner").textContent = DOC && DOC.owner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "";
+  const readOnlyNote = document.getElementById("read-only-note");
+  readOnlyNote.hidden = !locked;
+  if (locked) {
+    readOnlyNote.textContent = SHARED && !hasSharedOwner
+      ? "This list has no recorded maker, so it is view only. Ask an administrator to assign an owner, or use SAVE LIST AS to make an editable copy."
+      : "This list is view only. Save a copy with SAVE LIST AS to edit it.";
+  }
+  document.getElementById("open-file-owner").textContent = SHARED
+    ? (hasSharedOwner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "Owner not recorded · view only")
+    : (DOC && DOC.owner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "");
   for (const id of ["update-list-btn", "clear-btn", "restore-btn", "recover-btn", "save-btn"]) {
     const el = document.getElementById(id);
     if (el) { el.hidden = locked; el.disabled = locked; }
@@ -1625,13 +1650,19 @@ async function loadSharedList() {
     DOC.owner = data.createdBy || "";
     render();
     renderListPicker();
-    state.textContent = "Connected to the shared list — everyone on this site sees the same names.";
+    const ownershipReady = typeof SharedStore.ownershipReady !== "function" || SharedStore.ownershipReady();
+    state.textContent = !ownershipReady
+      ? SharedStore.ownershipMessage()
+      : (ownerKey(DOC.owner)
+        ? "Connected to the shared list. Only its maker can edit; other accounts can view or copy it."
+        : "This shared list has no recorded maker, so it is view only until an owner is assigned.");
     if (skipped) showToast("Some saved rows were skipped because they were incomplete.");
     SharedStore.startPoll(applySharedRemote);
   } catch (error) {
     state.classList.add("is-error");
-    state.textContent = "Could not load the shared list. Check your connection, then press Retry.";
-    showToast("Could not load the shared list.", "Retry", loadSharedList);
+    const setupError = error && /migration/i.test(error.message || "") ? error.message : "Could not load the shared list. Check your connection, then press Retry.";
+    state.textContent = setupError;
+    showToast(setupError, "Retry", loadSharedList);
   }
 }
 
