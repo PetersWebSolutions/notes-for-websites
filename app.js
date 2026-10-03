@@ -5,7 +5,7 @@
  * so a screenshot always says which build is actually running, and it matches
  * the ?v= token on all three pages. Storage is scoped to the open file.
  */
-const BUILD = "cfedf5";
+const BUILD = "6b8382";
 
 const Tally = window.Tally;
 
@@ -1191,11 +1191,11 @@ function render(options = {}) {
   if (locked) {
     readOnlyNote.textContent = SHARED && !hasSharedOwner
       ? "This list has no recorded maker, so it is view only. Ask an administrator to assign an owner, or use SAVE LIST AS to make an editable copy."
-      : "This list is view only. Save a copy with SAVE LIST AS to edit it.";
+      : `Only ${DOC.owner} can edit this list. You can view it, or save a copy with SAVE LIST AS.`;
   }
   document.getElementById("open-file-owner").textContent = SHARED
-    ? (hasSharedOwner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "Owner not recorded · view only")
-    : (DOC && DOC.owner ? (locked ? `${DOC.owner}'s list · view only` : "Your list") : "");
+    ? (hasSharedOwner ? (locked ? `Made by ${DOC.owner} · view only` : `Made by ${DOC.owner} · you can edit`) : "Owner not recorded · view only")
+    : (DOC && DOC.owner ? (locked ? `Made by ${DOC.owner} · view only` : `Made by ${DOC.owner} · you can edit`) : "");
   for (const id of ["update-list-btn", "clear-btn", "restore-btn", "recover-btn", "save-btn"]) {
     const el = document.getElementById(id);
     if (el) { el.hidden = locked; el.disabled = locked; }
@@ -1618,7 +1618,9 @@ function sharedBusy() {
 function applySharedRemote(remotePeople, updatedAt, info) {
   const before = JSON.stringify(people);
   const { restored } = restorePeople(remotePeople);
-  if (info && info.createdBy !== undefined) DOC.owner = info.createdBy;
+  // An empty poll must not wipe a maker we already resolved, or Joyce gets
+  // locked out of her own list while she is editing it.
+  if (info && ownerKey(info.createdBy)) DOC.owner = info.createdBy;
   if (JSON.stringify(restored) === before) { render(); return; }
   if (sharedBusy()) return; // the next poll tries again
   people = restored;

@@ -150,11 +150,17 @@ a list, never mid-edit.
 
 ### Existing lists
 
-Migration 0003 cannot infer who originally made older lists, so those rows keep
-`created_by = NULL` and are read-only until their true maker is assigned. Do
-not use `updated_by` as the owner automatically: it records the last editor,
-not necessarily the maker. Check the rows, then assign each verified owner in
-Supabase SQL Editor, for example:
+Migration 0003 cannot infer who originally made older lists, so those rows can
+keep `created_by = NULL`. A blank maker used to lock everyone out, including
+the person who made the list. On load the site fills a blank maker from the
+last editor and writes that name into `created_by`, so only that person can
+edit afterwards. Two lists Joyce confirmed she made — **Team Elite T-shirt
+Tally** and **Team Elite T-shirt Tally copy** — are recorded as hers even if
+the last editor is someone else. Anyone else can view those lists or save a
+copy; they cannot edit, rename, or delete them.
+
+Check the rows, then assign any remaining owner in Supabase SQL Editor, for
+example:
 
 ```sql
 select id, name, created_by, updated_by from public.shared_lists;

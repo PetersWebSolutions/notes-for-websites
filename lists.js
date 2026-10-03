@@ -87,8 +87,8 @@
       const mine = canEdit(doc);
       const maker = String(doc.createdBy || "").trim();
       const ownerMeta = SHARED
-        ? (ownerKey(maker) ? (mine ? "Your list" : `${maker}'s list · view only`) : "Owner not recorded · view only")
-        : (doc.owner ? (mine ? `by ${doc.owner}` : `${doc.owner}'s file · view only`) : "");
+        ? (ownerKey(maker) ? (mine ? `Made by ${maker} · you can edit` : `Made by ${maker} · view only`) : "Owner not recorded · view only")
+        : (doc.owner ? (mine ? `Made by ${doc.owner} · you can edit` : `Made by ${doc.owner} · view only`) : "");
       return h("li", { class: "file-item" },
         h("div", { class: "file-info" },
           h("h3", { class: "file-name", text: doc.name }),
