@@ -142,6 +142,8 @@ test('shared mode opens to everyone and renders the online list, not device stor
   const b = sharedBoot(t, { people: [ana, ben] });
   await tick();
   assert.equal(b.q('body').classList.contains('shared-mode'), true);
+  assert.equal(b.q('#step-order').hidden, false);
+  assert.match(b.q('#open-file-owner').textContent, /Made by Joyce · you can edit/);
   assert.deepEqual(b.qa('.name-text').map(n => n.textContent), ['Ana Reyes', 'Ben Cruz']);
   assert.equal(b.q('#open-file-name').textContent, 'Shared list');
   assert.match(b.q('#save-state').textContent, /Connected to the shared list/);
@@ -374,7 +376,7 @@ test('shared list owner sees editing actions; others only VIEW', async t => {
   assert.match(b.q('[data-rename="mine"]').outerHTML, /Rename/);
   assert.equal(b.q('[data-rename="theirs"]'), null);
   assert.equal(b.q('[data-delete="theirs"]'), null);
-  assert.match(b.q('.file-list, #file-list').textContent, /Gen's list · view only/);
+  assert.match(b.q('.file-list, #file-list').textContent, /Made by Gen · view only/);
   assert.match(b.q('a[href="index.html?list=theirs"]').textContent, /VIEW/);
 });
 
@@ -435,4 +437,123 @@ test('new shared rows record their maker in created_by', async t => {
   assert.match(await dom.window.SharedStore.create('A list', [], 'Joyce'), /^a-list-/);
   assert.equal(row.created_by, 'Joyce');
   assert.equal(row.updated_by, 'Joyce');
+});
+
+test('Joyce can edit the lists she made; other accounts cannot, even if created_by was blank', async t => {
+  const rows = [
+    { id: 'tally', name: 'Team Elite T-shirt Tally', people: [], created_by: null, updated_by: 'Stuts', updated_at: '2026-10-01T00:00:00.000Z' },
+    { id: 'copy', name: 'Team Elite T-shirt Tally copy', people: [], created_by: null, updated_by: null, updated_at: '2026-10-01T01:00:00.000Z' },
+    { id: 'gen', name: 'Gen batch', people: [], created_by: null, updated_by: 'Gen', updated_at: '2026-10-02T00:00:00.000Z' },
+    { id: 'blank', name: 'Untitled orders', people: [], created_by: null, updated_by: null, updated_at: '2026-10-03T00:00:00.000Z' }
+  ];
+  const patches = [];
+  function install(dom) {
+    dom.window.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k', listId: 'tally' };
+    dom.window.fetch = async (url, opts = {}) => {
+      const method = opts.method || 'GET';
+      if (method === 'GET') {
+        const idMatch = /id=eq\.([^&]+)/.exec(String(url));
+        const id = idMatch ? decodeURIComponent(idMatch[1]) : '';
+        const found = id ? rows.filter((row) => row.id === id) : rows;
+        return { ok: true, status: 200, json: async () => found.map((row) => Object.assign({}, row)) };
+      }
+      if (method === 'PATCH') {
+        const body = JSON.parse(opts.body);
+        const id = decodeURIComponent(String(url).split('id=eq.')[1] || '');
+        const row = rows.find((item) => item.id === id);
+        patches.push({ id, body });
+        if (row) Object.assign(row, body);
+        return { ok: true, status: 200, json: async () => (row ? [Object.assign({}, row)] : []) };
+      }
+      return { ok: false, status: 400, json: async () => ({}) };
+    };
+    const script = dom.window.document.createElement('script');
+    script.textContent = read('shared-store.js');
+    dom.window.document.body.appendChild(script);
+  }
+  const joyce = new JSDOM('<body></body>', { url: 'https://example.test/index.html?list=tally', runScripts: 'dangerously' });
+  t.after(() => joyce.window.close());
+  install(joyce);
+  const lists = await joyce.window.SharedStore.listAll({ withPeople: true });
+  const byId = Object.fromEntries(lists.map((list) => [list.id, list.createdBy]));
+  assert.deepEqual(byId, { tally: 'Joyce', copy: 'Joyce', gen: 'Gen', blank: '' });
+  assert.deepEqual(patches.map((patch) => [patch.id, patch.body.created_by]).sort(), [['copy', 'Joyce'], ['gen', 'Gen'], ['tally', 'Joyce']]);
+  assert.equal(rows.find((row) => row.id === 'blank').created_by, null);
+  patches.length = 0;
+  assert.equal(await joyce.window.SharedStore.save([{ name: 'Ana' }], { by: 'Joyce', at: 1759000000000 }), true);
+  assert.equal(patches[0].id, 'tally');
+  assert.equal(patches[0].body.created_by, 'Joyce');
+  assert.equal(patches[0].body.updated_by, 'Joyce');
+  assert.deepEqual(patches[0].body.people, [{ name: 'Ana' }]);
+
+  const gen = new JSDOM('<body></body>', { url: 'https://example.test/index.html?list=tally', runScripts: 'dangerously' });
+  t.after(() => gen.window.close());
+  install(gen);
+  await gen.window.SharedStore.load();
+  const before = patches.length;
+  assert.equal(await gen.window.SharedStore.save([{ name: 'Gen' }], { by: 'Gen' }), false);
+  assert.equal(patches.length, before, 'a non-maker must not write the list');
+  assert.equal(await gen.window.SharedStore.rename('tally', 'Taken', 'Gen'), false);
+  assert.equal(await gen.window.SharedStore.remove('tally', 'Gen'), false);
+
+  const genOwn = new JSDOM('<body></body>', { url: 'https://example.test/index.html?list=gen', runScripts: 'dangerously' });
+  t.after(() => genOwn.window.close());
+  install(genOwn);
+  const opened = await genOwn.window.SharedStore.load();
+  assert.equal(opened.createdBy, 'Gen');
+  assert.equal(await genOwn.window.SharedStore.save([], { by: 'Gen', at: 1759000001000 }), true);
+  assert.equal(await genOwn.window.SharedStore.save([], { by: 'Joyce', at: 1759000002000 }), false);
+});
+
+test('lists page lets the maker open her files and shows everyone else view only', async t => {
+  const rows = [
+    { id: 'tally', name: 'Team Elite T-shirt Tally', people: [], created_by: null, updated_by: null, updated_at: '2026-10-01T00:00:00.000Z' },
+    { id: 'copy', name: 'Team Elite T-shirt Tally copy', people: [], created_by: 'Joyce', updated_by: 'Joyce', updated_at: '2026-10-01T01:00:00.000Z' },
+    { id: 'gen', name: 'Gen batch', people: [], created_by: 'Gen', updated_by: 'Gen', updated_at: '2026-10-02T00:00:00.000Z' }
+  ];
+  function page(name) {
+    const b = boot('lists.html', { 'team-elite-session-v1': JSON.stringify({ id: 'u', name, at: 1 }) }, 'https://example.test/lists.html', ['store.js']);
+    b.w.SUPABASE_CONFIG = { url: 'https://demo.supabase.co', anonKey: 'k' };
+    b.w.fetch = async (url, opts = {}) => {
+      if ((opts.method || 'GET') === 'GET') return { ok: true, status: 200, json: async () => rows };
+      if (opts.method === 'PATCH') {
+        const id = decodeURIComponent(String(url).split('id=eq.')[1] || '');
+        const row = rows.find((item) => item.id === id);
+        if (row) Object.assign(row, JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => [] };
+      }
+      return { ok: false, status: 400, json: async () => ({}) };
+    };
+    ['shared-store.js', 'lists.js'].forEach((file) => {
+      const script = b.w.document.createElement('script');
+      script.textContent = read(file);
+      b.w.document.body.appendChild(script);
+    });
+    return b;
+  }
+  const joyce = page('Joyce');
+  t.after(joyce.close);
+  await tick();
+  const joyceRows = joyce.qa('.file-item');
+  const joyceOpen = Object.fromEntries(joyceRows.map((item) => [item.querySelector('.file-name').textContent, item.querySelector('.file-open').textContent]));
+  assert.deepEqual(joyceOpen, {
+    'Team Elite T-shirt Tally': 'OPEN',
+    'Team Elite T-shirt Tally copy': 'OPEN',
+    'Gen batch': 'VIEW'
+  });
+  assert.match(joyce.q('.file-list').textContent, /Made by Joyce · you can edit/);
+  assert.match(joyce.q('.file-list').textContent, /Made by Gen · view only/);
+  assert.equal(rows.find((row) => row.id === 'tally').created_by, 'Joyce');
+
+  const stuts = page('Stuts');
+  t.after(stuts.close);
+  await tick();
+  const stutsOpen = Object.fromEntries(stuts.qa('.file-item').map((item) => [item.querySelector('.file-name').textContent, item.querySelector('.file-open').textContent]));
+  assert.deepEqual(stutsOpen, {
+    'Team Elite T-shirt Tally': 'VIEW',
+    'Team Elite T-shirt Tally copy': 'VIEW',
+    'Gen batch': 'VIEW'
+  });
+  assert.equal(stuts.q('[data-rename="tally"]'), null);
+  assert.equal(stuts.q('[data-delete="copy"]'), null);
 });

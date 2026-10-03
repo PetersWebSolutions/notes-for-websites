@@ -90,7 +90,7 @@ test('files sorted by modification, counts and optional owner rendered as plain 
   assert.equal(b.q('.file-name').textContent,'<img src=x>');
   assert.equal(b.q('.file-name img'),null);
   assert.equal(b.qa('.file-meta')[0].textContent,'1 person · 4 shirts');
-  assert.equal(b.qa('.file-meta')[1].textContent,'2 people · 7 shirts · by Joyce');
+  assert.equal(b.qa('.file-meta')[1].textContent,'2 people · 7 shirts · Made by Joyce · you can edit');
   assert.equal(b.q('#who').textContent,'Signed in as Joyce');
   assert.equal(b.q('#files-count').textContent,'2 files on this device');
 });
@@ -99,7 +99,7 @@ test('device file owners alone can rename/delete their files; other accounts get
   store[KEYS.session]=JSON.stringify({id:'fixed-stuts',name:'Stuts',at:1});
   const b=page(t,'lists.html',store);
   assert.match(b.q('.file-open').textContent,/VIEW/);
-  assert.match(b.q('.file-meta').textContent,/Joyce's file · view only/);
+  assert.match(b.q('.file-meta').textContent,/Made by Joyce · view only/);
   assert.equal(b.q('[data-rename="a"]'),null);
   assert.equal(b.q('[data-delete="a"]'),null);
 });

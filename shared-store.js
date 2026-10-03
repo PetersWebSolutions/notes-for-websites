@@ -12,8 +12,13 @@
  *
  * The ownership column is required for writes. If it is missing, the page may
  * still display older lists as view-only and shows an actionable migration
- * message; it never silently makes ownerless lists editable. Existing rows with
- * a NULL created_by stay view-only until an administrator assigns their maker.
+ * message; it never silently makes ownerless lists editable.
+ *
+ * A blank created_by used to lock the maker out of her own list. The maker is
+ * created_by when that was stored, otherwise the last editor, and for the two
+ * lists Joyce confirmed she made, Joyce. The first load writes that maker back
+ * so the next visit does not have to guess. Saves use PATCH and send the maker
+ * again, because a merge-upsert that omits created_by can clear it.
  *
  * Plain fetch against Supabase's REST (PostgREST) API — no SDK, no build.
  */
@@ -31,14 +36,39 @@ const SharedStore = (function () {
     return String(config.listId || "main");
   }
 
+  function cleanLabel(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  }
+  function identity(value) { return cleanLabel(value).toLowerCase(); }
+  /* "T-shirt" and "Tshirt" are the same title for the confirmed-maker check. */
+  function titleKey(value) {
+    return identity(value).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim().replace(/\bt shirt\b/g, "tshirt");
+  }
+  /*
+   * Joyce confirmed these two lists are hers. Older rows have no created_by,
+   * which locked her out and showed them as view-only. The title match only
+   * fills or corrects the maker; it does not grant edit rights to anyone else.
+   */
+  const CONFIRMED_MAKER = {
+    "team elite tshirt tally": "Joyce",
+    "team elite tshirt tally copy": "Joyce"
+  };
+
   /* One meta row for the picker: { id, name, updatedAt, updatedBy, createdBy }. */
   function meta(row) {
+    const recorded = cleanLabel(row.created_by);
+    const editor = cleanLabel(row.updated_by);
+    const confirmed = ownerTrackingAvailable ? CONFIRMED_MAKER[titleKey(row.name)] || "" : "";
+    const maker = !ownerTrackingAvailable
+      ? ""
+      : (confirmed || recorded || editor);
     return {
       id: String(row.id),
       name: row.name ? String(row.name) : (row.id === "main" ? "Shared list" : String(row.id)),
       updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
-      updatedBy: row.updated_by ? String(row.updated_by) : "",
-      createdBy: row.created_by ? String(row.created_by) : ""
+      updatedBy: editor,
+      createdBy: maker,
+      recordedBy: recorded
     };
   }
 
@@ -49,12 +79,43 @@ const SharedStore = (function () {
   // still requires Supabase Auth plus RLS policies on the server.
   const ownerById = new Map();
 
-  function identity(value) { return String(value || "").trim().replace(/\s+/g, " ").toLowerCase(); }
-  function rememberOwner(id, owner) { ownerById.set(String(id), identity(owner)); }
+  function rememberOwner(id, owner) {
+    const name = cleanLabel(owner);
+    if (!name) ownerById.delete(String(id));
+    else ownerById.set(String(id), name);
+  }
   function canEdit(id, by) {
-    const owner = ownerById.get(String(id)) || "";
+    const owner = identity(ownerById.get(String(id)));
     const current = identity(by);
     return Boolean(ownerTrackingAvailable && owner && current && owner === current);
+  }
+  function needsMakerRepair(info) {
+    return Boolean(ownerTrackingAvailable && identity(info.createdBy) && identity(info.recordedBy) !== identity(info.createdBy));
+  }
+  async function persistMaker(id, maker) {
+    if (!ownerTrackingAvailable || !identity(maker)) return false;
+    try {
+      const res = await fetch(`${endpoint()}?id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: headers({ Prefer: "return=minimal" }),
+        body: JSON.stringify({ created_by: cleanLabel(maker) })
+      });
+      return res.ok;
+    } catch (error) { return false; }
+  }
+  async function repairMakers(lists) {
+    const pending = lists.filter(needsMakerRepair);
+    if (!pending.length) return;
+    await Promise.all(pending.map((list) => persistMaker(list.id, list.createdBy)));
+  }
+  function publish(info) {
+    return {
+      id: info.id,
+      name: info.name,
+      updatedAt: info.updatedAt,
+      updatedBy: info.updatedBy,
+      createdBy: info.createdBy
+    };
   }
   function ownershipReady() { return ownerTrackingAvailable; }
   function ownershipMessage() { return ownerTrackingAvailable ? "" : OWNER_SCHEMA_ERROR; }
@@ -95,6 +156,7 @@ const SharedStore = (function () {
     const row = rows.length ? rows[0] : null;
     const info = row ? meta(Object.assign({ id: listId() }, row)) : meta({ id: listId() });
     rememberOwner(info.id, info.createdBy);
+    if (row) await repairMakers([info]);
     return {
       people: row && Array.isArray(row.people) ? row.people : [],
       updatedAt: info.updatedAt,
@@ -112,7 +174,8 @@ const SharedStore = (function () {
       const rows = await getRows(`select=${cols}&order=updated_at.desc&limit=200`);
       const lists = rows.map((row) => Object.assign(meta(row), { people: Array.isArray(row.people) ? row.people : [] }));
       lists.forEach((list) => rememberOwner(list.id, list.createdBy));
-      return lists;
+      await repairMakers(lists);
+      return lists.map((list) => Object.assign(publish(list), { people: list.people }));
     } catch (error) { throw error; }
   }
 
@@ -181,17 +244,28 @@ const SharedStore = (function () {
 
   async function save(people, options = {}) {
     if (!canEdit(listId(), options.by)) return false;
-    const row = rowFor(people, options.at, { by: options.by, name: options.name });
-    // When the page is already closing, a fetch can be cancelled before it
-    // lands; sendBeacon is built for exactly that moment.
-    if (options.beacon && typeof navigator !== "undefined" && navigator.sendBeacon) {
-      try {
-        const blob = new Blob([JSON.stringify(row)], { type: "application/json" });
-        if (navigator.sendBeacon(endpoint(), blob)) return true;
-      } catch (error) { /* fall through to fetch */ }
-    }
+    const maker = ownerById.get(String(listId()));
+    const body = {
+      people,
+      updated_at: new Date(options.at || Date.now()).toISOString(),
+      created_by: maker
+    };
+    if (options.by) body.updated_by = cleanLabel(options.by);
+    if (options.name) body.name = String(options.name).slice(0, 80);
+    // PATCH the open row and send the maker again. A merge-upsert that omits
+    // created_by can clear it on Supabase and lock the person who made the list.
+    // keepalive lets the write finish if the tab is already closing; sendBeacon
+    // cannot attach the API key, so it is not used.
     try {
-      return await post(row);
+      const res = await fetch(`${endpoint()}?id=eq.${encodeURIComponent(listId())}`, {
+        method: "PATCH",
+        headers: headers({ Prefer: "return=representation" }),
+        body: JSON.stringify(body),
+        keepalive: Boolean(options.beacon)
+      });
+      if (!res.ok) return false;
+      const rows = await res.json().catch(() => []);
+      return Array.isArray(rows) && rows.length > 0;
     } catch (error) {
       return false;
     }

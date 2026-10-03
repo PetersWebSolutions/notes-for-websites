@@ -97,15 +97,20 @@ function handleSharedLists(req, res, url) {
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       const rows = readRows();
+      let changed;
       if (req.method === 'DELETE') {
+        changed = rows.filter((row) => row.id === id);
         writeRows(rows.filter((row) => row.id !== id));
       } else {
         let patch = {};
         try { patch = JSON.parse(body || '{}'); } catch (error) { patch = {}; }
-        writeRows(rows.map((row) => (row.id === id ? Object.assign({}, row, patch) : row)));
+        const next = rows.map((row) => (row.id === id ? Object.assign({}, row, patch) : row));
+        changed = next.filter((row) => row.id === id);
+        writeRows(next);
       }
-      res.writeHead(204);
-      res.end();
+      // Match Supabase Prefer: return=representation so callers can see the row.
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(changed));
     });
     return;
   }
