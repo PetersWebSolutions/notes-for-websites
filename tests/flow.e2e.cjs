@@ -103,7 +103,7 @@ for (const width of [390, 1440]) {
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     }
     await page.locator('.back-link').click();
-    await expect(page.locator('.file-meta')).toHaveText('1 person · 3 shirts · by Joyce');
+    await expect(page.locator('.file-meta')).toHaveText('1 person · 3 shirts · Made by Joyce · you can edit');
     await page.locator('#file-name').fill('Second file');
     await page.locator('#new-file-btn').click();
     await page.locator('.file-item').filter({hasText:'Second file'}).locator('.file-open').click();
